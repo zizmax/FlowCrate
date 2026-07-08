@@ -33,6 +33,37 @@ def _is_host_unreachable(exc):
     return False
 
 
+def list_speakers(timeout=5):
+    """Return a list of dicts describing discoverable Sonos speakers.
+
+    Each dict has keys ``room`` (player name), ``ip`` (IP address string), and
+    ``coordinator`` (True when the speaker is its own group coordinator).  The
+    list is sorted by room name.  Returns an empty list when nothing is found;
+    raises :exc:`SonosError` only on a hard network error.
+    """
+    try:
+        zones = soco.discover(timeout=timeout) or scan_network(scan_timeout=2.0) or set()
+    except Exception as exc:
+        if _is_host_unreachable(exc):
+            raise SonosError(_LOCAL_NETWORK_HINT) from exc
+        raise SonosError(f"Sonos discovery failed: {exc}") from exc
+
+    result = []
+    for zone in sorted(zones, key=lambda z: z.player_name):
+        try:
+            is_coordinator = zone.group.coordinator.ip_address == zone.ip_address
+        except Exception:
+            is_coordinator = False
+        result.append(
+            {
+                "room": zone.player_name,
+                "ip": zone.ip_address,
+                "coordinator": is_coordinator,
+            }
+        )
+    return result
+
+
 def get_speaker(ip=None, room=None, timeout=5):
     """Return the group coordinator SoCo device to play on.
 

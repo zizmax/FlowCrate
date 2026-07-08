@@ -1,5 +1,8 @@
 import argparse
 import logging
+import platform
+import socket
+import subprocess
 import threading
 import time
 import webbrowser
@@ -202,6 +205,8 @@ def create_app():
             config_file=CONFIG_FILE,
             checks=_status_checks(),
             test_results=test_results,
+            local_hostname=_local_hostname(),
+            local_port=request.host.rsplit(":", 1)[1] if ":" in request.host else "80",
         )
 
     @app.route("/settings/reset", methods=["POST"])
@@ -324,6 +329,20 @@ def create_app():
     @app.route("/status")
     def status():
         return redirect(url_for("settings"))
+
+    @app.route("/api/sonos-devices")
+    def api_sonos_devices():
+        try:
+            devices = sonos.list_speakers(timeout=5)
+            return jsonify({"ok": True, "devices": devices})
+        except sonos.SonosError as exc:
+            return jsonify({"ok": False, "error": str(exc), "devices": []})
+        except Exception as exc:
+            logging.exception("api/sonos-devices failed")
+            error = str(exc)
+            if sonos._is_host_unreachable(exc):
+                error = sonos._LOCAL_NETWORK_HINT
+            return jsonify({"ok": False, "error": error, "devices": []})
 
     @app.route("/api/play-latest", methods=["POST"])
     def api_play_latest():
@@ -550,6 +569,28 @@ def _status_checks():
         ("Spotify token cache", str(TOKEN_CACHE), TOKEN_CACHE.exists()),
     ]
     return checks
+
+
+def _local_hostname():
+    """Return the local mDNS hostname, e.g. ``mymac.local``.
+
+    On macOS, gethostname() often returns the DHCP-derived name (like
+    ``192-168-0-31.lan``), which other devices cannot resolve; the Bonjour
+    name from ``scutil --get LocalHostName`` is what .local resolution uses.
+    """
+    name = ""
+    if platform.system() == "Darwin":
+        try:
+            name = subprocess.run(
+                ["scutil", "--get", "LocalHostName"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip().lower()
+        except Exception:
+            name = ""
+    if not name:
+        name = socket.gethostname().lower()
+        name = name.removesuffix(".lan").removesuffix(".local")
+    return name + ".local"
 
 
 def main(argv=None):

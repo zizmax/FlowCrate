@@ -51,19 +51,33 @@
     </div>
     <label>
       Sonos Speaker IP
-      <input name="SONOS_IP" type="text" value="{{ cfg.sonos_ip }}">
+      <input id="sonos-ip-input" name="SONOS_IP" type="text" value="{{ cfg.sonos_ip }}">
     </label>
     <label>
       Sonos Room Name
-      <input name="SONOS_ROOM" type="text" value="{{ cfg.sonos_room }}">
+      <input id="sonos-room-input" name="SONOS_ROOM" type="text" value="{{ cfg.sonos_room }}">
     </label>
+    <div class="button-row">
+      <button id="sonos-scan-btn" type="button">Scan for Speakers</button>
+      <select id="sonos-speaker-select" hidden>
+        <option value="">— choose a speaker —</option>
+      </select>
+      <span id="sonos-scan-msg" class="inline-result error" hidden></span>
+    </div>
     <label>
       API Token
-      <input name="API_TOKEN" type="password" value="{{ cfg.api_token }}">
+      <input id="api-token-input" name="API_TOKEN" type="password" value="{{ cfg.api_token }}">
     </label>
+    <div class="button-row">
+      <button id="generate-token-btn" type="button">Generate Token</button>
+    </div>
     <div class="button-row">
       <button class="primary" name="action" value="save" type="submit">Save Settings</button>
     </div>
+    <p class="muted">
+      Shortcut URL: <code>http://{{ local_hostname }}:{{ local_port }}/api/play-latest</code><br>
+      Add this URL and the API Token to your Apple Shortcut — see <code>docs/SIRI_SETUP.md</code> for setup instructions.
+    </p>
   </form>
 
   <form action="{{ url_for('reset_settings') }}" method="post" class="danger-zone stack">
@@ -94,4 +108,72 @@
     </table>
   </div>
 </section>
+
+<script>
+  (() => {
+    // --- Scan for Speakers ---
+    const scanBtn = document.getElementById("sonos-scan-btn");
+    const speakerSelect = document.getElementById("sonos-speaker-select");
+    const scanMsg = document.getElementById("sonos-scan-msg");
+    const ipInput = document.getElementById("sonos-ip-input");
+    const roomInput = document.getElementById("sonos-room-input");
+
+    const showScanError = (msg) => {
+      speakerSelect.hidden = true;
+      scanMsg.textContent = msg;
+      scanMsg.hidden = false;
+    };
+
+    scanBtn.addEventListener("click", () => {
+      scanBtn.disabled = true;
+      scanMsg.hidden = true;
+      speakerSelect.hidden = true;
+      scanBtn.textContent = "Scanning…";
+      fetch("/api/sonos-devices")
+        .then((r) => r.json())
+        .then((data) => {
+          if (!data.ok || !data.devices || data.devices.length === 0) {
+            showScanError(data.error || "No speakers found on this network.");
+            return;
+          }
+          // Rebuild options beyond the placeholder
+          while (speakerSelect.options.length > 1) speakerSelect.remove(1);
+          data.devices.forEach((d) => {
+            const opt = document.createElement("option");
+            opt.value = JSON.stringify({ room: d.room, ip: d.ip });
+            opt.textContent = d.room + " (" + d.ip + ")";
+            speakerSelect.appendChild(opt);
+          });
+          speakerSelect.hidden = false;
+        })
+        .catch(() => {
+          showScanError("Could not reach /api/sonos-devices.");
+        })
+        .finally(() => {
+          scanBtn.disabled = false;
+          scanBtn.textContent = "Scan for Speakers";
+        });
+    });
+
+    speakerSelect.addEventListener("change", () => {
+      if (!speakerSelect.value) return;
+      try {
+        const parsed = JSON.parse(speakerSelect.value);
+        roomInput.value = parsed.room;
+        ipInput.value = parsed.ip;
+      } catch (_) {}
+    });
+
+    // --- Generate Token ---
+    const tokenInput = document.getElementById("api-token-input");
+    const generateBtn = document.getElementById("generate-token-btn");
+
+    generateBtn.addEventListener("click", () => {
+      if (tokenInput.value && !confirm("Replace the existing API token with a new one?")) return;
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      tokenInput.value = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+    });
+  })();
+</script>
 {% endblock %}

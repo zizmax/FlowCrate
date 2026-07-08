@@ -199,5 +199,129 @@ class BuildSpeakTests(unittest.TestCase):
         )
 
 
+class SonosDevicesEndpointTests(unittest.TestCase):
+    def _app(self):
+        app = create_app()
+        app.config.update(TESTING=True)
+        return app
+
+    def test_success_returns_devices(self):
+        devices = [
+            {"room": "Kitchen", "ip": "192.168.1.10", "coordinator": True},
+            {"room": "Office", "ip": "192.168.1.11", "coordinator": False},
+        ]
+        with patch("flowcrate.app.sonos.list_speakers", return_value=devices):
+            response = self._app().test_client().get("/api/sonos-devices")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["devices"], devices)
+
+    def test_exception_returns_ok_false_with_error(self):
+        import errno as _errno
+        exc = OSError(_errno.EHOSTUNREACH, "No route to host")
+        exc.errno = _errno.EHOSTUNREACH
+        with patch("flowcrate.app.sonos.list_speakers", side_effect=exc):
+            response = self._app().test_client().get("/api/sonos-devices")
+
+        data = response.get_json()
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["devices"], [])
+        # The Local Network hint should appear in the error message
+        self.assertIn("Local Network", data["error"])
+
+    def test_sonos_error_returns_ok_false(self):
+        from flowcrate import sonos as sonos_module
+        with patch("flowcrate.app.sonos.list_speakers",
+                   side_effect=sonos_module.SonosError("boom")):
+            response = self._app().test_client().get("/api/sonos-devices")
+
+        data = response.get_json()
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["error"], "boom")
+        self.assertEqual(data["devices"], [])
+
+    def test_no_auth_required(self):
+        """Endpoint is accessible without any token header."""
+        with patch("flowcrate.app.sonos.list_speakers", return_value=[]):
+            response = self._app().test_client().get("/api/sonos-devices")
+        self.assertEqual(response.status_code, 200)
+
+
+class SonosListSpeakersTests(unittest.TestCase):
+    def test_returns_sorted_speaker_list(self):
+        from flowcrate import sonos as sonos_module
+
+        zone_a = MagicMock()
+        zone_a.player_name = "Office"
+        zone_a.ip_address = "192.168.1.11"
+        zone_a.group.coordinator.ip_address = "192.168.1.11"
+
+        zone_b = MagicMock()
+        zone_b.player_name = "Kitchen"
+        zone_b.ip_address = "192.168.1.10"
+        zone_b.group.coordinator.ip_address = "192.168.1.99"  # different coordinator
+
+        with patch("flowcrate.sonos.soco.discover", return_value={zone_a, zone_b}):
+            result = sonos_module.list_speakers(timeout=1)
+
+        self.assertEqual(len(result), 2)
+        # Sorted by room name: Kitchen < Office
+        self.assertEqual(result[0]["room"], "Kitchen")
+        self.assertEqual(result[0]["ip"], "192.168.1.10")
+        self.assertFalse(result[0]["coordinator"])
+        self.assertEqual(result[1]["room"], "Office")
+        self.assertTrue(result[1]["coordinator"])
+
+    def test_empty_when_no_speakers_found(self):
+        from flowcrate import sonos as sonos_module
+
+        with patch("flowcrate.sonos.soco.discover", return_value=None), \
+             patch("flowcrate.sonos.scan_network", return_value=None):
+            result = sonos_module.list_speakers(timeout=1)
+
+        self.assertEqual(result, [])
+
+    def test_raises_sonos_error_on_host_unreachable(self):
+        import errno as _errno
+        from flowcrate import sonos as sonos_module
+
+        exc = OSError(_errno.EHOSTUNREACH, "No route to host")
+        exc.errno = _errno.EHOSTUNREACH
+        with patch("flowcrate.sonos.soco.discover", side_effect=exc):
+            with self.assertRaises(sonos_module.SonosError) as ctx:
+                sonos_module.list_speakers(timeout=1)
+        self.assertIn("Local Network", str(ctx.exception))
+
+
+class SettingsPageTests(unittest.TestCase):
+    def _get_settings(self):
+        from flowcrate.config import AppConfig
+        app = create_app()
+        app.config.update(TESTING=True)
+        empty_cfg = AppConfig()
+        with patch("flowcrate.app.load_config", return_value=empty_cfg):
+            return app.test_client().get("/settings")
+
+    def test_settings_renders_scan_button(self):
+        response = self._get_settings()
+        self.assertEqual(response.status_code, 200)
+        html = response.get_data(as_text=True)
+        self.assertIn("Scan for Speakers", html)
+        self.assertIn("sonos-scan-btn", html)
+
+    def test_settings_renders_generate_token_button(self):
+        html = self._get_settings().get_data(as_text=True)
+        self.assertIn("Generate Token", html)
+        self.assertIn("generate-token-btn", html)
+
+    def test_settings_renders_shortcut_url(self):
+        html = self._get_settings().get_data(as_text=True)
+        self.assertIn("/api/play-latest", html)
+        self.assertIn(".local", html)
+        self.assertNotIn(".lan.local", html)
+
+
 if __name__ == "__main__":
     unittest.main()
