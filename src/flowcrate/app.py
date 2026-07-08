@@ -8,7 +8,16 @@ import time
 import webbrowser
 from datetime import datetime
 
-from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
+from flask import (
+    Flask,
+    Response,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 
 from . import __version__, sonos
 from .cache import (
@@ -26,6 +35,7 @@ from .logs import list_logs, read_log
 from .paths import CONFIG_FILE, LOGS_DIR, PROJECT_ROOT, TOKEN_CACHE, ensure_dirs
 from .playback import DevicePickerRequired, resolve_playback_target
 from .scraper import get_recent_posts, reset_session_cache, test_flowstate_fetch
+from .shortcut import ShortcutError, signed_shortcut
 from .spotify import SpotifyManager, SpotifyRateLimitError
 
 # Single-flight background refresh: page load, tab focus, and the API may all trigger
@@ -193,7 +203,7 @@ def create_app():
             checks=_status_checks(),
             test_results=test_results,
             local_hostname=_local_hostname(),
-            local_port=request.host.rsplit(":", 1)[1] if ":" in request.host else "80",
+            local_port=_local_port(),
         )
 
     @app.route("/settings/reset", methods=["POST"])
@@ -346,6 +356,22 @@ def create_app():
             }
         )
 
+    @app.route("/api/siri-shortcut")
+    def api_siri_shortcut():
+        cfg = load_config()
+        if not cfg.api_token:
+            return jsonify({"ok": False, "error": "Set an API token in Settings first."}), 400
+        url = f"http://{_local_hostname()}:{_local_port()}/api/play-latest"
+        try:
+            data = signed_shortcut(url, cfg.api_token)
+        except ShortcutError as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 502
+        return Response(
+            data,
+            mimetype="application/octet-stream",
+            headers={"Content-Disposition": 'attachment; filename="Play Flow Crate.shortcut"'},
+        )
+
     return app
 
 
@@ -445,9 +471,14 @@ def _local_hostname():
     return name + ".local"
 
 
+def _local_port():
+    """Return the port from the current request's host, defaulting to 80."""
+    return request.host.rsplit(":", 1)[1] if ":" in request.host else "80"
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Run the Flow Crate local web UI.")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args(argv)

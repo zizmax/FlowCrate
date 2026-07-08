@@ -70,14 +70,46 @@
     </label>
     <div class="button-row">
       <button id="generate-token-btn" type="button">Generate Token</button>
+      <button id="toggle-token-btn" type="button">Show</button>
+      <button id="copy-token-btn" type="button">Copy</button>
     </div>
     <div class="button-row">
       <button class="primary" name="action" value="save" type="submit">Save Settings</button>
     </div>
-    <p class="muted">
-      Shortcut URL: <code>http://{{ local_hostname }}:{{ local_port }}/api/play-latest</code><br>
-      Add this URL and the API Token to your Apple Shortcut — see <code>docs/SIRI_SETUP.md</code> for setup instructions.
-    </p>
+
+    <div class="siri-setup">
+      <p>
+        <a class="button primary" href="/api/siri-shortcut" download>Download Siri Shortcut</a>
+      </p>
+      <p class="muted">
+        Open this Settings page in Safari on your iPhone
+        (<code>http://{{ local_hostname }}:{{ local_port }}/settings</code>),
+        tap Download Siri Shortcut, open the downloaded file, then tap Add Shortcut.
+        Then say: "Hey Siri, Play Flow Crate".
+      </p>
+
+      <details class="advanced">
+        <summary>Set up the Shortcut manually</summary>
+        <p class="muted">The phone must be on the same Wi-Fi network as this computer.</p>
+        <p>On your iPhone, open Shortcuts, create a new shortcut named exactly
+          <strong>Play Flow Crate</strong> (the name is the Siri phrase), and add
+          these three actions:</p>
+        <ol>
+          <li><strong>Get Contents of URL</strong>
+            <ul>
+              <li>URL: <code>http://{{ local_hostname }}:{{ local_port }}/api/play-latest</code></li>
+              <li>Method: <code>POST</code></li>
+              <li>Header: <code>X-FlowCrate-Token</code> = your API token (above)</li>
+              <li>No request body is needed — the endpoint accepts an empty body and plays immediately.</li>
+            </ul>
+          </li>
+          <li><strong>Get Dictionary Value</strong> — key <code>speak</code> from the previous action's output.</li>
+          <li><strong>Speak Text</strong> — the Dictionary Value.</li>
+        </ol>
+        <p class="muted">Then say "Hey Siri, Play Flow Crate." Music starts on the
+          configured Sonos room and Siri reads the post title, date, and track count.</p>
+      </details>
+    </div>
   </form>
 
   <form action="{{ url_for('reset_settings') }}" method="post" class="danger-zone stack">
@@ -174,6 +206,41 @@
       const bytes = new Uint8Array(16);
       crypto.getRandomValues(bytes);
       tokenInput.value = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+    });
+
+    // --- Show / Hide token ---
+    const toggleBtn = document.getElementById("toggle-token-btn");
+    toggleBtn.addEventListener("click", () => {
+      if (tokenInput.type === "password") {
+        tokenInput.type = "text";
+        toggleBtn.textContent = "Hide";
+      } else {
+        tokenInput.type = "password";
+        toggleBtn.textContent = "Show";
+      }
+    });
+
+    // --- Copy token ---
+    const copyBtn = document.getElementById("copy-token-btn");
+    const flashCopied = () => {
+      copyBtn.textContent = "Copied!";
+      setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+    };
+    copyBtn.addEventListener("click", () => {
+      const value = tokenInput.value;
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(value).then(flashCopied).catch(() => {});
+        return;
+      }
+      // Fallback for non-secure origins (plain http on the LAN), where
+      // navigator.clipboard is undefined.
+      const wasMasked = tokenInput.type === "password";
+      if (wasMasked) tokenInput.type = "text";
+      tokenInput.select();
+      try {
+        if (document.execCommand("copy")) flashCopied();
+      } catch (_) {}
+      if (wasMasked) tokenInput.type = "password";
     });
   })();
 </script>

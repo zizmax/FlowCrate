@@ -322,6 +322,80 @@ class SettingsPageTests(unittest.TestCase):
         self.assertIn(".local", html)
         self.assertNotIn(".lan.local", html)
 
+    def test_settings_renders_download_shortcut_and_no_md_reference(self):
+        html = self._get_settings().get_data(as_text=True)
+        self.assertIn("Download Siri Shortcut", html)
+        self.assertIn("/api/siri-shortcut", html)
+        self.assertIn("toggle-token-btn", html)
+        self.assertIn("copy-token-btn", html)
+        # The docs/SIRI_SETUP.md reference must be gone.
+        self.assertNotIn("SIRI_SETUP.md", html)
+
+
+class ShortcutWorkflowTests(unittest.TestCase):
+    def test_url_and_token_land_in_workflow(self):
+        from flowcrate.shortcut import build_workflow
+
+        wf = build_workflow("http://mymac.local:8765/api/play-latest", "tok123")
+        actions = wf["WFWorkflowActions"]
+        download = actions[0]["WFWorkflowActionParameters"]
+        self.assertEqual(download["WFURL"], "http://mymac.local:8765/api/play-latest")
+        header_item = download["WFHTTPHeaders"]["Value"]["WFDictionaryFieldValueItems"][0]
+        self.assertEqual(header_item["WFKey"]["Value"]["string"], "X-FlowCrate-Token")
+        self.assertEqual(header_item["WFValue"]["Value"]["string"], "tok123")
+
+    def test_three_actions_in_expected_order(self):
+        from flowcrate.shortcut import build_workflow
+
+        wf = build_workflow("http://x/api/play-latest", "tok")
+        identifiers = [a["WFWorkflowActionIdentifier"] for a in wf["WFWorkflowActions"]]
+        self.assertEqual(
+            identifiers,
+            [
+                "is.workflow.actions.downloadurl",
+                "is.workflow.actions.getvalueforkey",
+                "is.workflow.actions.speaktext",
+            ],
+        )
+
+
+class SiriShortcutRouteTests(unittest.TestCase):
+    def _app(self):
+        app = create_app()
+        app.config.update(TESTING=True)
+        return app
+
+    def test_400_when_no_token_configured(self):
+        with patch("flowcrate.app.load_config", return_value=_cfg(api_token="")):
+            response = self._app().test_client().get("/api/siri-shortcut")
+        self.assertEqual(response.status_code, 400)
+        data = response.get_json()
+        self.assertFalse(data["ok"])
+        self.assertIn("API token", data["error"])
+
+    def test_success_returns_signed_attachment(self):
+        with patch("flowcrate.app.load_config", return_value=_cfg()), \
+             patch("flowcrate.app.signed_shortcut", return_value=b"SIGNED") as sign:
+            response = self._app().test_client().get("/api/siri-shortcut")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b"SIGNED")
+        self.assertIn("attachment", response.headers["Content-Disposition"])
+        self.assertIn("Play Flow Crate.shortcut", response.headers["Content-Disposition"])
+        sign.assert_called_once()
+        url_arg = sign.call_args[0][0]
+        self.assertIn("/api/play-latest", url_arg)
+
+    def test_502_on_shortcut_error(self):
+        from flowcrate.shortcut import ShortcutError
+
+        with patch("flowcrate.app.load_config", return_value=_cfg()), \
+             patch("flowcrate.app.signed_shortcut", side_effect=ShortcutError("boom")):
+            response = self._app().test_client().get("/api/siri-shortcut")
+        self.assertEqual(response.status_code, 502)
+        data = response.get_json()
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["error"], "boom")
+
 
 if __name__ == "__main__":
     unittest.main()
