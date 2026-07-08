@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Setup - Flow Crate{% endblock %}
+{% block content %}
+<section class="panel narrow">
+  <h1>Setup</h1>
+  <p class="muted">Settings are saved locally at <code>{{ config_file }}</code>.</p>
+
+  <form method="post" class="stack">
+    <label>
+      Spotify Client ID
+      <input name="SPOTIFY_CLIENT_ID" type="text" value="{{ cfg.spotify_client_id }}">
+    </label>
+    <label>
+      Spotify Client Secret
+      <input name="SPOTIFY_CLIENT_SECRET" type="password" value="{{ cfg.spotify_client_secret }}">
+    </label>
+    <label>
+      Spotify Redirect URI
+      <input name="SPOTIFY_REDIRECT_URI" type="text" value="{{ cfg.spotify_redirect_uri }}">
+    </label>
+    <label>
+      Substack SID
+      <input name="SUBSTACK_SID" type="password" value="{{ cfg.substack_sid }}">
+    </label>
+    <p class="muted">Substack SID is optional. If left blank, Flow Crate tries local browser cookies from Chrome, Firefox, Safari, Brave, Edge, and Chromium, then falls back to public access.</p>
+    <div class="button-row">
+      <button class="primary" name="action" value="save" type="submit">Save</button>
+      <button name="action" value="test_spotify" type="submit">Test Spotify</button>
+      <button name="action" value="test_substack" type="submit">Test Substack</button>
+    </div>
+  </form>
+</section>
+{% endblock %}

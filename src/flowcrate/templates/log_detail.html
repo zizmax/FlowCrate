@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}{{ filename }} - Flow Crate{% endblock %}
+{% block content %}
+<section class="panel">
+  <div class="split">
+    <div>
+      <h1>{{ filename }}</h1>
+      <p class="muted">{{ rows|length }} rows{% if status %}, filtered to {{ status }}{% endif %}</p>
+    </div>
+    <div class="button-row">
+      <a class="button" href="{{ url_for('log_detail', filename=filename) }}">All</a>
+      <a class="button" href="{{ url_for('log_detail', filename=filename, status='FOUND') }}">Found</a>
+      <a class="button" href="{{ url_for('log_detail', filename=filename, status='MISMATCH_REJECTED') }}">Rejected</a>
+      <a class="button" href="{{ url_for('log_detail', filename=filename, status='NOT_FOUND') }}">Missing</a>
+    </div>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Parsed</th>
+          <th>Spotify</th>
+          <th>Source</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td><span class="badge {{ row.match_status }}">{{ row.match_status }}</span></td>
+            <td>{{ row.parsed_artist }} - {{ row.parsed_name }}</td>
+            <td>
+              {% if row.spotify_link %}
+                <a href="{{ row.spotify_link }}" target="_blank" rel="noreferrer">{{ row.spotify_artist }} - {{ row.spotify_name }}</a>
+              {% endif %}
+            </td>
+            <td><a href="{{ row.source_url }}" target="_blank" rel="noreferrer">{{ row.source_date or "post" }}</a></td>
+            <td>
+              {{ row.failure_reason }}
+              {% if row.children %}
+                <details class="track-details">
+                  <summary>{{ row.children|length }} album tracks</summary>
+                  <table class="nested-table">
+                    <tbody>
+                      {% for child in row.children %}
+                        <tr>
+                          <td>{{ child.track_number or loop.index }}</td>
+                          <td>
+                            {% if child.spotify_link %}
+                              <a href="{{ child.spotify_link }}" target="_blank" rel="noreferrer">{{ child.spotify_artist }} - {{ child.spotify_name }}</a>
+                            {% else %}
+                              {{ child.spotify_artist }} - {{ child.spotify_name }}
+                            {% endif %}
+                          </td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </details>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,7 @@
+Flask
+requests
+beautifulsoup4
+python-dotenv
+browser_cookie3
+spotipy
+

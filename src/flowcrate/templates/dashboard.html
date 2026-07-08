@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - Flow Crate{% endblock %}
+{% block content %}
+{% set latest = dashboard.latest %}
+{% set latest_post = dashboard.latest_post %}
+{% set latest_summary = dashboard.latest_summary %}
+{% set cache_status = dashboard.cache_status %}
+{% set spotify_state = dashboard.spotify_state %}
+
+{% if device_picker %}
+  <section class="panel picker-panel">
+    <h1>Choose Device</h1>
+    <p class="muted">Spotify reported multiple devices for {{ device_picker.track_count }} selected track(s).</p>
+    <form action="{{ url_for('dashboard_action') }}" method="post" class="button-row">
+      <input type="hidden" name="action" value="{{ device_picker.action }}">
+      {% for entry_id in device_picker.entry_ids %}
+        <input type="hidden" name="entry_id" value="{{ entry_id }}">
+      {% endfor %}
+      <label class="device-select">
+        Device
+        <select name="device_id">
+          {% for device in device_picker.devices %}
+            <option value="{{ device.id }}">{{ device.name }}{% if device.is_active %} (active){% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <button class="primary" type="submit">Continue</button>
+    </form>
+  </section>
+{% endif %}
+
+{% if spotify_state and spotify_state.active %}
+  <section class="service-banner warning">
+    <strong>Spotify unavailable</strong>
+    <p class="muted">{{ spotify_state.message }}</p>
+  </section>
+{% endif %}
+
+{% if cache_status and cache_status.needs_refresh %}
+  <section class="inline-refresh-prompt">
+    <div>
+      <strong>{{ cache_status.label }}</strong>
+      <p class="muted">
+        Cached rows may be bundled sample data, not the current Flow State archive.
+        Refresh explicitly to fetch the latest post plus 10 previous posts.
+      </p>
+    </div>
+    <form action="{{ url_for('refresh_dashboard') }}" method="post">
+      <button class="primary" type="submit">Refresh Flow State</button>
+    </form>
+  </section>
+{% endif %}
+
+<form action="{{ url_for('dashboard_action') }}" method="post" class="dashboard-form" data-selection-dashboard>
+  <section class="panel latest-panel">
+    <div class="split latest-heading">
+      <div>
+        <p class="eyebrow">Latest Flow State</p>
+        {% if latest %}
+          <h1>{{ latest.title }}</h1>
+          <p class="muted">
+            {{ latest.date or "Date unknown" }}
+            {% if latest.url %} - <a href="{{ latest.url }}" target="_blank" rel="noreferrer">Source</a>{% endif %}
+          </p>
+        {% else %}
+          <h1>No cached posts yet</h1>
+          <p class="muted">Refresh Flow State to build the local cache.</p>
+        {% endif %}
+      </div>
+      <div class="cache-card">
+        <span class="small muted">Cache status</span>
+        <strong>{{ cache_status.label if cache_status else "Needs refresh" }}</strong>
+        {% if cache_status and cache_status.value %}
+          <span class="small">{{ cache_status.value }}</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="latest-toolbar">
+      <div class="hero-stats">
+        <span>{{ latest_summary.entry_count }} ready entries</span>
+        {% if latest_summary.linked_count %}<span>{{ latest_summary.linked_count }} linked albums</span>{% endif %}
+        <span>{{ latest_summary.track_count }} tracks</span>
+        {% if latest_summary.duration %}<span>{{ latest_summary.duration }}</span>{% endif %}
+        {% if latest_summary.notes %}<span>{{ latest_summary.notes }}</span>{% endif %}
+      </div>
+      <div class="bulk-actions">
+        <span class="selected-count" data-selected-count="dashboard">0 selected</span>
+        <button class="play-button" name="action" value="play" type="submit" {% if not latest_summary.actionable_count %}disabled{% endif %}>Play Latest</button>
+        <button name="action" value="queue" type="submit">Add to Queue</button>
+        <button name="action" value="playlist" type="submit">Create Playlist</button>
+        <button formaction="{{ url_for('refresh_dashboard') }}" formmethod="post" type="submit">Refresh Flow State</button>
+      </div>
+    </div>
+
+    {% set latest_groups = [latest_post] if latest_post else [] %}
+    {% with post_groups=latest_groups, default_checked=true, selection_scope="latest" %}
+      {% include "_entry_table.html" %}
+    {% endwith %}
+  </section>
+
+  <section class="panel archive-panel">
+    <div class="split">
+      <div>
+        <h1>Archive</h1>
+        <p class="muted">Previous cached posts, newest first.</p>
+      </div>
+      <div class="archive-summary">
+        <span>{{ dashboard.archive_summary.entry_count }} ready entries</span>
+        {% if dashboard.archive_summary.linked_count %}<span>{{ dashboard.archive_summary.linked_count }} linked albums</span>{% endif %}
+        <span>{{ dashboard.archive_summary.track_count }} tracks</span>
+      </div>
+    </div>
+    {% with post_groups=dashboard.archive_posts, default_checked=false, selection_scope="archive" %}
+      {% include "_entry_table.html" %}
+    {% endwith %}
+  </section>
+</form>
+
+<script>
+  (() => {
+    const entries = () => Array.from(document.querySelectorAll("[data-selectable-entry]"));
+    const playable = (scope) => entries().filter((entry) => {
+      if (entry.disabled) return false;
+      if (!scope) return true;
+      return entry.dataset.selectGroup === scope || entry.dataset.selectPost === scope;
+    });
+
+    const updateCounts = () => {
+      document.querySelectorAll("[data-selected-count]").forEach((counter) => {
+        const scope = counter.dataset.selectedCount;
+        const selected = playable(scope === "dashboard" ? "" : scope).filter((entry) => entry.checked).length;
+        counter.textContent = `${selected} selected`;
+      });
+      document.querySelectorAll(".select-all").forEach((control) => {
+        const scoped = playable(control.dataset.selectTarget);
+        const selected = scoped.filter((entry) => entry.checked).length;
+        control.checked = scoped.length > 0 && selected === scoped.length;
+        control.indeterminate = selected > 0 && selected < scoped.length;
+      });
+    };
+
+    document.addEventListener("change", (event) => {
+      const target = event.target;
+      if (target.matches(".select-all")) {
+        playable(target.dataset.selectTarget).forEach((entry) => {
+          entry.checked = target.checked;
+        });
+      }
+      if (target.matches(".select-all, [data-selectable-entry]")) updateCounts();
+    });
+
+    document.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-toggle-children]");
+      if (!button) return;
+      const key = button.dataset.toggleChildren;
+      const rows = Array.from(document.querySelectorAll("[data-child-of]")).filter((row) => row.dataset.childOf === key);
+      const expanded = button.getAttribute("aria-expanded") === "true";
+      rows.forEach((row) => {
+        row.hidden = expanded;
+      });
+      button.setAttribute("aria-expanded", expanded ? "false" : "true");
+    });
+
+    updateCounts();
+  })();
+</script>
+{% endblock %}

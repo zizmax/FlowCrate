@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Preview - Flow Crate{% endblock %}
+{% block content %}
+{% set playlist = preview.get("playlist", {}) %}
+{% set output_mode = preview.get("output_mode", "playlist") %}
+<section class="panel">
+  <div class="split">
+    <div>
+      <h1>Preview</h1>
+      <p class="muted">{{ playlist.get("name") or preview.playlist_name }} - {{ preview.results|length }} source items - {{ track_count }} resolved tracks - {{ "Public" if playlist.get("public") else "Private" }}</p>
+      <p class="muted">{{ playlist.get("description") or preview.playlist_description or "Created by Flow Crate." }}</p>
+      {% if preview.source_preset %}
+        <p class="muted">Source: {{ preview.source_preset.label }}</p>
+      {% endif %}
+    </div>
+    <form action="{{ url_for('create_from_preview', preview_id=preview.id) }}" method="post" class="output-form">
+      <fieldset class="segmented">
+        <legend>Output</legend>
+        <label>
+          <input name="output_mode" type="radio" value="playlist" {% if output_mode == "playlist" %}checked{% endif %}>
+          Playlist
+        </label>
+        <label>
+          <input name="output_mode" type="radio" value="queue" {% if output_mode == "queue" %}checked{% endif %}>
+          Queue
+        </label>
+        <label>
+          <input name="output_mode" type="radio" value="playlist_and_queue" {% if output_mode == "playlist_and_queue" %}checked{% endif %}>
+          Playlist + Queue
+        </label>
+      </fieldset>
+      <button class="primary" type="submit" {% if not counts.get('FOUND') %}disabled{% endif %}>Create</button>
+    </form>
+  </div>
+
+  <div class="stats">
+    {% for status, count in counts.items() %}
+      <span class="stat">{{ status }}: {{ count }}</span>
+    {% endfor %}
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Parsed</th>
+          <th>Spotify</th>
+          <th>Type</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in preview.results %}
+          <tr>
+            <td><span class="badge {{ row.match_status }}">{{ row.match_status }}</span></td>
+            <td>{{ row.parsed_artist }} - {{ row.parsed_name }}</td>
+            <td>
+              {% if row.spotify_link %}
+                <a href="{{ row.spotify_link }}" target="_blank" rel="noreferrer">{{ row.spotify_artist }} - {{ row.spotify_name }}</a>
+              {% else %}
+                <span class="muted">No match</span>
+              {% endif %}
+            </td>
+            <td>{{ row.parsed_type }}</td>
+            <td>
+              {{ row.failure_reason or "" }}
+              {% if row.children %}
+                <details class="track-details">
+                  <summary>{{ row.children|length }} album tracks</summary>
+                  <table class="nested-table">
+                    <tbody>
+                      {% for child in row.children %}
+                        <tr>
+                          <td>{{ child.track_number or loop.index }}</td>
+                          <td>
+                            {% if child.spotify_link %}
+                              <a href="{{ child.spotify_link }}" target="_blank" rel="noreferrer">{{ child.spotify_artist }} - {{ child.spotify_name }}</a>
+                            {% else %}
+                              {{ child.spotify_artist }} - {{ child.spotify_name }}
+                            {% endif %}
+                          </td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </details>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

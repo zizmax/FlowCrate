@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Logs - Flow Crate{% endblock %}
+{% block content %}
+<section class="panel">
+  <h1>Logs</h1>
+  <p class="muted">Run logs are read from <code>{{ logs_dir }}</code>.</p>
+  {% if logs %}
+    <table>
+      <thead>
+        <tr><th>File</th><th>Format</th><th>Rows</th><th>Modified</th></tr>
+      </thead>
+      <tbody>
+        {% for log in logs %}
+          <tr>
+            <td><a href="{{ url_for('log_detail', filename=log.filename) }}">{{ log.filename }}</a></td>
+            <td><span class="badge neutral">{{ log.format }}</span></td>
+            <td>{{ log.rows }}</td>
+            <td>{{ log.modified|fmt_time }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p>No logs yet.</p>
+  {% endif %}
+</section>
+{% endblock %}

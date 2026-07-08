@@ -1,0 +1,218 @@
+{% set groups = post_groups if post_groups is defined else [] %}
+{% set table_entries = entries if entries is defined else [] %}
+{% if groups %}
+  <div class="table-wrap">
+    <table class="entry-table grouped-entry-table" data-selection-scope="{{ selection_scope or 'entries' }}">
+      <thead>
+        <tr>
+          <th class="check-cell">
+            <input
+              type="checkbox"
+              class="select-all"
+              data-select-target="{{ selection_scope or 'entries' }}"
+              aria-label="Select all playable rows in this table"
+              {% if default_checked %}checked{% endif %}
+            >
+          </th>
+          <th>Entry</th>
+          <th>Spotify</th>
+          <th>Duration</th>
+          <th>Notes</th>
+          <th>Tracks</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for post in groups %}
+          {% set post_scope = (selection_scope or 'entries') ~ '-post-' ~ loop.index %}
+          <tr class="post-group-row">
+            <td class="check-cell">
+              <input
+                type="checkbox"
+                class="select-all"
+                data-select-target="{{ post_scope }}"
+                aria-label="Select all playable rows for {{ post.title }}"
+                {% if default_checked %}checked{% endif %}
+              >
+            </td>
+            <td colspan="6">
+              <div class="post-group-heading">
+                <div>
+                  <strong>{{ post.title }}</strong>
+                  <span class="muted">{{ post.date or "Date unknown" }}</span>
+                  {% if post.url %}<a href="{{ post.url }}" target="_blank" rel="noreferrer">Source</a>{% endif %}
+                </div>
+                <div class="post-group-meta">
+                  <span>{{ post.playable_entry_count }} ready</span>
+                  {% if post.linked_entry_count %}<span>{{ post.linked_entry_count }} linked</span>{% endif %}
+                  <span>{{ post.track_count }} tracks</span>
+                  <span class="selected-count" data-selected-count="{{ post_scope }}">0 selected</span>
+                </div>
+              </div>
+            </td>
+          </tr>
+          {% set post_loop = loop.index %}
+          {% for entry in post.entries %}
+            {% set child_key = (selection_scope or 'entries') ~ '-' ~ post_loop ~ '-' ~ loop.index %}
+            <tr>
+              <td class="check-cell">
+                <input
+                  type="checkbox"
+                  name="entry_id"
+                  value="{{ entry.row_id }}"
+                  data-selectable-entry
+                  data-select-group="{{ selection_scope or 'entries' }}"
+                  data-select-post="{{ post_scope }}"
+                  {% if default_checked and entry.playable %}checked{% endif %}
+                  {% if not entry.playable %}disabled{% endif %}
+                >
+              </td>
+              <td class="artist-cell">
+                <strong>{{ entry.parsed_artist }} - {{ entry.parsed_name }}</strong>
+                <div class="muted small">{{ entry.parsed_type }}</div>
+              </td>
+              <td>
+                {% if entry.spotify_link %}
+                  <a href="{{ entry.spotify_link }}" target="_blank" rel="noreferrer">{{ entry.spotify_artist or entry.parsed_artist }} - {{ entry.spotify_name or entry.parsed_name }}</a>
+                {% else %}
+                  <span class="muted">No Spotify URI</span>
+                {% endif %}
+              </td>
+              <td>{{ entry.duration_display or "" }}</td>
+              <td>{{ entry.notes or "" }}</td>
+              <td>
+                {% if entry.children %}
+                  <button class="link-button child-toggle" type="button" data-toggle-children="{{ child_key }}" aria-expanded="false">{{ entry.children|length }} tracks</button>
+                {% else %}
+                  {{ entry.track_count or 0 }}
+                {% endif %}
+              </td>
+              <td>
+                <span class="badge {{ entry.readiness_key }}" title="{{ entry.readiness_tooltip }}">{{ entry.readiness_status }}</span>
+                {% if entry.failure_reason %}<div class="muted small">{{ entry.failure_reason }}</div>{% endif %}
+              </td>
+            </tr>
+            {% for child in entry.children %}
+              <tr class="child-track-row" data-child-of="{{ child_key }}" hidden>
+                <td class="check-cell"></td>
+                <td class="child-track-cell">
+                  <span class="track-number">{{ child.track_number or loop.index }}</span>
+                  <strong>{{ child.spotify_artist }} - {{ child.spotify_name }}</strong>
+                  <div class="muted small">album track</div>
+                </td>
+                <td>
+                  {% if child.spotify_link %}
+                    <a href="{{ child.spotify_link }}" target="_blank" rel="noreferrer">{{ child.spotify_uri }}</a>
+                  {% else %}
+                    <span class="muted">{{ child.spotify_uri }}</span>
+                  {% endif %}
+                </td>
+                <td>{{ child.duration_ms and (child.duration_ms // 60000) ~ "m" or "" }}</td>
+                <td></td>
+                <td>1</td>
+                <td><span class="badge status-ready" title="Track URI is available through the expanded album.">Ready</span></td>
+              </tr>
+            {% endfor %}
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% elif table_entries %}
+  <div class="table-wrap">
+    <table class="entry-table" data-selection-scope="{{ selection_scope or 'entries' }}">
+      <thead>
+        <tr>
+          <th class="check-cell">
+            <input
+              type="checkbox"
+              class="select-all"
+              data-select-target="{{ selection_scope or 'entries' }}"
+              aria-label="Select all playable rows in this table"
+              {% if default_checked %}checked{% endif %}
+            >
+          </th>
+          {% if show_post %}<th>Post</th>{% endif %}
+          <th>Entry</th>
+          <th>Spotify</th>
+          <th>Duration</th>
+          <th>Notes</th>
+          <th>Tracks</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for entry in table_entries %}
+          {% set child_key = (selection_scope or 'entries') ~ '-row-' ~ loop.index %}
+          <tr>
+            <td class="check-cell">
+              <input
+                type="checkbox"
+                name="entry_id"
+                value="{{ entry.row_id }}"
+                data-selectable-entry
+                data-select-group="{{ selection_scope or 'entries' }}"
+                {% if default_checked and entry.playable %}checked{% endif %}
+                {% if not entry.playable %}disabled{% endif %}
+              >
+            </td>
+            {% if show_post %}
+              <td>
+                <a href="{{ entry.source_url }}" target="_blank" rel="noreferrer">{{ entry.post_title or entry.source_date or "Post" }}</a>
+                <div class="muted small">{{ entry.post_date or entry.source_date }}</div>
+              </td>
+            {% endif %}
+            <td>
+              <strong>{{ entry.parsed_artist }} - {{ entry.parsed_name }}</strong>
+              <div class="muted small">{{ entry.parsed_type }}</div>
+            </td>
+            <td>
+              {% if entry.spotify_link %}
+                <a href="{{ entry.spotify_link }}" target="_blank" rel="noreferrer">{{ entry.spotify_artist or entry.parsed_artist }} - {{ entry.spotify_name or entry.parsed_name }}</a>
+              {% else %}
+                <span class="muted">No Spotify URI</span>
+              {% endif %}
+            </td>
+            <td>{{ entry.duration_display or "" }}</td>
+            <td>{{ entry.notes or "" }}</td>
+            <td>
+              {% if entry.children %}
+                <button class="link-button child-toggle" type="button" data-toggle-children="{{ child_key }}" aria-expanded="false">{{ entry.children|length }} tracks</button>
+              {% else %}
+                {{ entry.track_count or 0 }}
+              {% endif %}
+            </td>
+            <td>
+              <span class="badge {{ entry.readiness_key }}" title="{{ entry.readiness_tooltip }}">{{ entry.readiness_status }}</span>
+              {% if entry.failure_reason %}<div class="muted small">{{ entry.failure_reason }}</div>{% endif %}
+            </td>
+          </tr>
+          {% for child in entry.children %}
+            <tr class="child-track-row" data-child-of="{{ child_key }}" hidden>
+              <td class="check-cell"></td>
+              {% if show_post %}<td></td>{% endif %}
+              <td class="child-track-cell">
+                <span class="track-number">{{ child.track_number or loop.index }}</span>
+                <strong>{{ child.spotify_artist }} - {{ child.spotify_name }}</strong>
+                <div class="muted small">album track</div>
+              </td>
+              <td>
+                {% if child.spotify_link %}
+                  <a href="{{ child.spotify_link }}" target="_blank" rel="noreferrer">{{ child.spotify_uri }}</a>
+                {% else %}
+                  <span class="muted">{{ child.spotify_uri }}</span>
+                {% endif %}
+              </td>
+              <td>{{ child.duration_ms and (child.duration_ms // 60000) ~ "m" or "" }}</td>
+              <td></td>
+              <td>1</td>
+              <td><span class="badge status-ready" title="Track URI is available through the expanded album.">Ready</span></td>
+            </tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% else %}
+  <p class="muted">No cached entries.</p>
+{% endif %}

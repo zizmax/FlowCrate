@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Job - Flow Crate{% endblock %}
+{% block content %}
+<section class="panel narrow">
+  <h1>{{ job.title }}</h1>
+  <div id="job-status">
+    {% include "_job_status.html" %}
+  </div>
+</section>
+<script>
+  function pollJob() {
+    fetch("{{ url_for('job_status', job_id=job.id) }}")
+      .then(response => response.text())
+      .then(html => {
+        document.getElementById("job-status").innerHTML = html;
+        if (!html.includes("data-final=\"true\"")) {
+          window.setTimeout(pollJob, 2000);
+        }
+      });
+  }
+  window.setTimeout(pollJob, 1500);
+</script>
+{% endblock %}

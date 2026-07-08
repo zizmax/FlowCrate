@@ -1,0 +1,28 @@
+<div class="job-status" data-final="{% if job.state in ['completed', 'failed'] %}true{% else %}false{% endif %}">
+  <p><strong>State:</strong> {{ job.state }}</p>
+  <p><strong>Phase:</strong> {{ job.phase }}</p>
+  {% if job.error %}
+    <div class="flash error">{{ job.error }}</div>
+  {% endif %}
+  {% if job.result %}
+    <div class="result">
+      <p><strong>Tracks added:</strong> {{ job.result.track_count }}</p>
+      <p><strong>Output:</strong> {{ job.result.output_mode.replace("_", " ") }}</p>
+      {% if job.result.playlist and job.result.playlist.url %}
+        <p><a href="{{ job.result.playlist.url }}" target="_blank" rel="noreferrer">Open Spotify playlist</a></p>
+      {% endif %}
+      {% if job.result.queue and job.result.queue.added %}
+        <p>Queued {{ job.result.queue.added }} tracks.</p>
+      {% endif %}
+      <p><a href="{{ url_for('log_detail', filename=job.result.log_filename) }}">Open JSON run log</a></p>
+      {% if job.result.csv_log_filename %}
+        <p><a href="{{ url_for('log_detail', filename=job.result.csv_log_filename) }}">Open CSV compatibility log</a></p>
+      {% endif %}
+    </div>
+  {% endif %}
+  <ul class="messages">
+    {% for message in job.messages[-12:]|reverse %}
+      <li>{{ message }}</li>
+    {% endfor %}
+  </ul>
+</div>
