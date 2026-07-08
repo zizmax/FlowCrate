@@ -4,6 +4,7 @@ import os
 import plistlib
 import subprocess
 import tempfile
+import uuid
 
 
 class ShortcutError(RuntimeError):
@@ -15,6 +16,10 @@ def _text(value):
 
 
 def build_workflow(url, token):
+    # Actions don't chain implicitly in generated files: downstream parameters
+    # must reference the upstream action's output by UUID (the "magic variable"
+    # wiring the Shortcuts editor normally adds for you).
+    dict_value_uuid = str(uuid.uuid4()).upper()
     return {
         "WFWorkflowMinimumClientVersion": 900,
         "WFWorkflowMinimumClientVersionString": "900",
@@ -57,11 +62,28 @@ def build_workflow(url, token):
                 "WFWorkflowActionParameters": {
                     "WFGetDictionaryValueType": "Value",
                     "WFDictionaryKey": "speak",
+                    "UUID": dict_value_uuid,
                 },
             },
+            # Show Result both speaks the text (when run via Siri) and shows
+            # it in the Siri notification.
             {
-                "WFWorkflowActionIdentifier": "is.workflow.actions.speaktext",
-                "WFWorkflowActionParameters": {},
+                "WFWorkflowActionIdentifier": "is.workflow.actions.showresult",
+                "WFWorkflowActionParameters": {
+                    "Text": {
+                        "Value": {
+                            "attachmentsByRange": {
+                                "{0, 1}": {
+                                    "OutputName": "Dictionary Value",
+                                    "OutputUUID": dict_value_uuid,
+                                    "Type": "ActionOutput",
+                                }
+                            },
+                            "string": "\ufffc",  # object-replacement char the attachment replaces
+                        },
+                        "WFSerializationType": "WFTextTokenString",
+                    },
+                },
             },
         ],
     }

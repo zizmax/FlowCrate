@@ -354,9 +354,22 @@ class ShortcutWorkflowTests(unittest.TestCase):
             [
                 "is.workflow.actions.downloadurl",
                 "is.workflow.actions.getvalueforkey",
-                "is.workflow.actions.speaktext",
+                "is.workflow.actions.showresult",
             ],
         )
+
+    def test_show_result_wired_to_dictionary_value_output(self):
+        from flowcrate.shortcut import build_workflow
+
+        wf = build_workflow("http://x/api/play-latest", "tok")
+        actions = wf["WFWorkflowActions"]
+        dict_uuid = actions[1]["WFWorkflowActionParameters"]["UUID"]
+        self.assertTrue(dict_uuid)
+        text = actions[2]["WFWorkflowActionParameters"]["Text"]["Value"]
+        attachment = text["attachmentsByRange"]["{0, 1}"]
+        self.assertEqual(attachment["OutputUUID"], dict_uuid)
+        self.assertEqual(attachment["Type"], "ActionOutput")
+        self.assertEqual(text["string"], "￼")
 
 
 class SiriShortcutRouteTests(unittest.TestCase):
