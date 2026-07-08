@@ -1,7 +1,9 @@
+import threading
 import unittest
 from unittest.mock import patch
 
-from flowcrate.app import create_app
+import flowcrate.app as app_module
+from flowcrate.app import _start_background_refresh, create_app
 
 
 class AppTests(unittest.TestCase):
@@ -9,7 +11,8 @@ class AppTests(unittest.TestCase):
         app = create_app()
         app.config.update(TESTING=True)
 
-        with patch("flowcrate.app.dashboard_data", return_value=_dashboard_payload()):
+        with patch("flowcrate.app.dashboard_data", return_value=_dashboard_payload()), \
+             patch("flowcrate.app.cache_is_stale", return_value=False):
             response = app.test_client().get("/")
 
         self.assertEqual(response.status_code, 200)
@@ -28,6 +31,33 @@ class AppTests(unittest.TestCase):
         self.assertIn("child-track-row", html)
         self.assertNotIn("artist-continuation", html)
         self.assertIn("Archive", html)
+
+
+class BackgroundRefreshLockTests(unittest.TestCase):
+    def test_only_one_refresh_runs_at_a_time(self):
+        release = threading.Event()
+        started = threading.Event()
+        calls = []
+
+        def slow_refresh(limit=11):
+            calls.append(limit)
+            started.set()
+            release.wait(timeout=5)
+
+        with patch("flowcrate.app.refresh_from_flowstate", side_effect=slow_refresh):
+            self.assertTrue(_start_background_refresh(limit=2))
+            self.assertTrue(started.wait(timeout=5))
+            # A second trigger while the first is running is refused (single-flight).
+            self.assertFalse(_start_background_refresh(limit=2))
+            release.set()
+            # Let the worker finish and clear the running flag.
+            for _ in range(250):
+                if not app_module._REFRESH_STATE["running"]:
+                    break
+                threading.Event().wait(0.02)
+
+        self.assertEqual(calls, [2])
+        self.assertFalse(app_module._REFRESH_STATE["running"])
 
 
 def _dashboard_payload():

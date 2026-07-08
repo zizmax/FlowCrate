@@ -5,10 +5,15 @@ from unittest.mock import Mock, patch
 
 from spotipy.exceptions import SpotifyException
 
+from datetime import datetime, timedelta
+
 from flowcrate.cache import (
+    _set_cache_meta,
+    cache_is_stale,
     connect,
     dashboard_data,
     import_seed,
+    latest_cached_post,
     parse_metadata,
     refresh_from_flowstate,
     replace_cache,
@@ -200,6 +205,185 @@ class CacheTests(unittest.TestCase):
 
         self.assertEqual(calls.call_count, 1)
         self.assertTrue(state["active"])
+
+
+class StalenessTests(unittest.TestCase):
+    def test_missing_refreshed_at_is_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "flowcrate.db"
+            with connect(db_path) as conn:
+                import_seed(conn, _seed_payload())
+            self.assertTrue(cache_is_stale(hours=8, db_path=db_path))
+
+    def test_recent_refresh_is_not_stale_and_old_refresh_is_stale(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "flowcrate.db"
+            with connect(db_path) as conn:
+                import_seed(conn, _seed_payload())
+
+            fresh = (datetime.now() - timedelta(hours=7, minutes=59)).isoformat(timespec="seconds")
+            stale = (datetime.now() - timedelta(hours=8, minutes=1)).isoformat(timespec="seconds")
+
+            with connect(db_path) as conn:
+                _set_cache_meta(conn, "refreshed_at", fresh)
+                conn.commit()
+            self.assertFalse(cache_is_stale(hours=8, db_path=db_path))
+
+            with connect(db_path) as conn:
+                _set_cache_meta(conn, "refreshed_at", stale)
+                conn.commit()
+            self.assertTrue(cache_is_stale(hours=8, db_path=db_path))
+
+    def test_latest_cached_post_returns_newest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "flowcrate.db"
+            with connect(db_path) as conn:
+                import_seed(conn, _two_post_payload())
+            post, entries = latest_cached_post(db_path=db_path)
+        self.assertEqual(post["title"], "Latest")
+        self.assertEqual([entry["row_id"] for entry in entries], ["entry-latest"])
+
+
+class RefreshSearchTests(unittest.TestCase):
+    def test_refresh_searches_unlinked_and_persists_track(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "flowcrate.db"
+            searcher = Mock()
+            searcher.search_item.return_value = {
+                "uri": "spotify:track:found",
+                "spotify_name": "Found Name",
+                "spotify_artist": "Found Artist",
+                "spotify_link": "https://open.spotify.com/track/found",
+                "status": "FOUND",
+                "match_type": "SEARCH_STRICT",
+                "failure_reason": None,
+            }
+            with patch("flowcrate.cache.get_recent_posts", return_value=[_unlinked_post()]), patch(
+                "flowcrate.cache.extract_source_post", return_value=_unlinked_source()
+            ), patch("flowcrate.cache.SpotifyManager", return_value=searcher):
+                count = refresh_from_flowstate(limit=1, db_path=db_path)
+
+            self.assertEqual(count, 1)
+            searcher.search_item.assert_called_once_with("Artist", "Song", "track")
+            data = dashboard_data(db_path)
+            entry = data["latest_entries"][0]
+            self.assertEqual(entry["spotify_uri"], "spotify:track:found")
+            self.assertEqual(entry["match_status"], "FOUND")
+            self.assertEqual(entry["readiness_status"], "Ready")
+            with connect(db_path) as conn:
+                track = conn.execute(
+                    "SELECT spotify_uri FROM tracks WHERE entry_id = ?", (entry["row_id"],)
+                ).fetchone()
+            self.assertEqual(track["spotify_uri"], "spotify:track:found")
+
+    def test_refresh_skips_already_searched_entries(self):
+        from flowcrate.cache import _resolve_unlinked_entries
+
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "flowcrate.db"
+            payload = {
+                "posts": [
+                    {
+                        "title": "Mix",
+                        "url": "https://www.flowstate.fm/p/mix",
+                        "date": "2026-05-24",
+                        "entries": [
+                            {
+                                "row_id": "needs",
+                                "parsed_artist": "New",
+                                "parsed_name": "Song",
+                                "parsed_type": "track",
+                                "match_status": "NEEDS_MATCH",
+                            },
+                            {
+                                "row_id": "done",
+                                "parsed_artist": "Old",
+                                "parsed_name": "Track",
+                                "parsed_type": "track",
+                                "match_status": "NOT_FOUND",
+                            },
+                        ],
+                    }
+                ]
+            }
+            with connect(db_path) as conn:
+                replace_cache(conn, payload, cache_source="flowstate")
+
+            searcher = Mock()
+            searcher.search_item.return_value = {"status": "NOT_FOUND", "uri": None}
+            state = {"searcher": searcher, "rate_limited": False}
+            with connect(db_path) as conn:
+                _resolve_unlinked_entries(conn, "https://www.flowstate.fm/p/mix", state)
+                conn.commit()
+
+            searcher.search_item.assert_called_once_with("New", "Song", "track")
+
+    def test_rate_limit_stops_search_but_refresh_completes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "flowcrate.db"
+            searcher = Mock()
+            searcher.search_item.side_effect = SpotifyRateLimitError(retry_after=30)
+            with patch("flowcrate.cache.get_recent_posts", return_value=[_unlinked_post()]), patch(
+                "flowcrate.cache.extract_source_post", return_value=_unlinked_source(two_items=True)
+            ), patch("flowcrate.cache.SpotifyManager", return_value=searcher):
+                count = refresh_from_flowstate(limit=1, db_path=db_path)
+
+            self.assertEqual(count, 1)
+            self.assertEqual(searcher.search_item.call_count, 1)
+            data = dashboard_data(db_path)
+            for entry in data["latest_entries"]:
+                self.assertIsNone(entry["spotify_uri"])
+                self.assertEqual(entry["match_status"], "NEEDS_MATCH")
+
+    def test_refresh_completes_without_credentials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "flowcrate.db"
+            with patch("flowcrate.cache.get_recent_posts", return_value=[_unlinked_post()]), patch(
+                "flowcrate.cache.extract_source_post", return_value=_unlinked_source()
+            ), patch("flowcrate.cache.SpotifyManager", side_effect=ValueError("no creds")):
+                count = refresh_from_flowstate(limit=1, db_path=db_path)
+
+            self.assertEqual(count, 1)
+            data = dashboard_data(db_path)
+            self.assertEqual(data["latest_entries"][0]["match_status"], "NEEDS_MATCH")
+
+
+def _unlinked_post():
+    return {"title": "New", "url": "https://www.flowstate.fm/p/new", "date": "2026-05-24"}
+
+
+def _unlinked_source(two_items=False):
+    items = [
+        {
+            "artist": "Artist",
+            "name": "Song",
+            "type": "track",
+            "spotify_link": None,
+            "metadata": "5m",
+            "raw_text": "Song - Artist",
+            "source_url": "https://www.flowstate.fm/p/new",
+            "source_date": "2026-05-24",
+        }
+    ]
+    if two_items:
+        items.append(
+            {
+                "artist": "Other",
+                "name": "Second",
+                "type": "track",
+                "spotify_link": None,
+                "metadata": "4m",
+                "raw_text": "Second - Other",
+                "source_url": "https://www.flowstate.fm/p/new",
+                "source_date": "2026-05-24",
+            }
+        )
+    return {
+        "title": "New",
+        "source_date": "2026-05-24",
+        "raw_html": "<html>snapshot</html>",
+        "items": items,
+    }
 
 
 def _seed_payload():

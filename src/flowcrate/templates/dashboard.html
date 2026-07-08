@@ -29,6 +29,10 @@
   </section>
 {% endif %}
 
+<section class="inline-refresh-status" data-refresh-indicator{% if not refreshing %} hidden{% endif %}>
+  <span class="muted">Checking Flow State for new posts…</span>
+</section>
+
 {% if spotify_state and spotify_state.active %}
   <section class="service-banner warning">
     <strong>Spotify unavailable</strong>
@@ -163,6 +167,46 @@
     });
 
     updateCounts();
+  })();
+</script>
+
+<script>
+  (() => {
+    const indicator = document.querySelector("[data-refresh-indicator]");
+    const showIndicator = (on) => { if (indicator) indicator.hidden = !on; };
+    let polling = {{ 'true' if refreshing else 'false' }};
+
+    const poll = () => {
+      fetch("/api/refresh-status").then((r) => r.json()).then((data) => {
+        if (data.refreshing) {
+          showIndicator(true);
+          setTimeout(poll, 3000);
+        } else if (polling) {
+          window.location.reload();
+        } else {
+          showIndicator(false);
+        }
+      }).catch(() => {});
+    };
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState !== "visible") return;
+      fetch("/api/refresh-status").then((r) => r.json()).then((data) => {
+        if (data.refreshing) {
+          polling = true;
+          showIndicator(true);
+          setTimeout(poll, 3000);
+        } else if (data.stale) {
+          fetch("/api/refresh", { method: "POST" }).then(() => {
+            polling = true;
+            showIndicator(true);
+            setTimeout(poll, 3000);
+          }).catch(() => {});
+        }
+      }).catch(() => {});
+    });
+
+    if (polling) setTimeout(poll, 3000);
   })();
 </script>
 {% endblock %}

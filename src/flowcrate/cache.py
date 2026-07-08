@@ -1,12 +1,13 @@
 import json
+import logging
 import re
 import sqlite3
 from hashlib import sha256
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from .paths import FLOWCRATE_DB, PROJECT_ROOT, SEEDS_DIR, ensure_dirs
 from .scraper import extract_source_post, get_recent_posts
-from .spotify import SpotifyRateLimitError, parse_spotify_url, spotify_service_state
+from .spotify import SpotifyManager, SpotifyRateLimitError, parse_spotify_url, spotify_service_state
 
 SEED_FILE = SEEDS_DIR / "flowstate_recent_seed.json"
 
@@ -65,6 +66,8 @@ def refresh_from_flowstate(limit=11, progress=None, db_path=None):
     posts = get_recent_posts(limit=limit)
     now = datetime.now().isoformat(timespec="seconds")
     fetched_count = 0
+    # searcher: None = not yet built, False = unavailable, otherwise a SpotifyManager.
+    searcher_state = {"searcher": None, "rate_limited": False}
     with connect(db_path) as conn:
         known = _known_posts(conn)
         _set_cache_meta(conn, "refresh_started_at", now)
@@ -89,6 +92,7 @@ def refresh_from_flowstate(limit=11, progress=None, db_path=None):
             else:
                 upsert_source_post(conn, post, source, idx - 1, now, content_hash)
                 fetched_count += 1
+                _resolve_unlinked_entries(conn, url, searcher_state, progress=progress)
             _set_cache_meta(conn, "last_checkpoint_url", url)
             _set_cache_meta(conn, "last_checkpoint_at", datetime.now().isoformat(timespec="seconds"))
             conn.commit()
@@ -99,6 +103,147 @@ def refresh_from_flowstate(limit=11, progress=None, db_path=None):
         _set_cache_meta(conn, "refreshed_at", now)
         conn.commit()
     return fetched_count
+
+
+# Terminal match states are never searched again: each item is searched at most once, ever.
+_TERMINAL_MATCH_STATUS = ("FOUND", "NOT_FOUND", "MISMATCH_REJECTED")
+
+
+def _resolve_unlinked_entries(conn, post_url, searcher_state, progress=None):
+    """Search Spotify for entries in a freshly fetched post that have no URI.
+
+    Only entries never searched before (no terminal match_status) are resolved,
+    so each item costs at most one Spotify search across all refreshes. A rate
+    limit stops searching entirely so remaining items wait for a future refresh.
+    """
+    if searcher_state.get("rate_limited"):
+        return
+    rows = conn.execute(
+        """
+        SELECT row_id, parsed_artist, parsed_name, parsed_type
+        FROM entries
+        WHERE post_url = ?
+          AND (spotify_uri IS NULL OR spotify_uri = '')
+          AND COALESCE(match_status, '') NOT IN ('FOUND', 'NOT_FOUND', 'MISMATCH_REJECTED')
+        ORDER BY position
+        """,
+        (post_url,),
+    ).fetchall()
+    if not rows:
+        return
+    searcher = _refresh_searcher(searcher_state)
+    if not searcher:
+        return
+    for row in rows:
+        if progress:
+            progress(f"Searching Spotify for {row['parsed_artist']} - {row['parsed_name']}")
+        try:
+            found = searcher.search_item(row["parsed_artist"], row["parsed_name"], row["parsed_type"] or "track")
+        except SpotifyRateLimitError:
+            searcher_state["rate_limited"] = True
+            logging.warning("Spotify rate limit reached during refresh; leaving remaining items unsearched.")
+            return
+        except Exception as exc:
+            logging.warning("Spotify search failed for %s: %s", row["parsed_name"], exc)
+            continue
+        _apply_search_result(conn, row["row_id"], post_url, found)
+        conn.commit()
+
+
+def _refresh_searcher(searcher_state):
+    if searcher_state["searcher"] is None:
+        try:
+            searcher_state["searcher"] = SpotifyManager()
+        except Exception as exc:
+            logging.warning("Spotify search unavailable during refresh: %s", exc)
+            searcher_state["searcher"] = False
+    return searcher_state["searcher"]
+
+
+def _apply_search_result(conn, row_id, post_url, found):
+    status = found.get("status") or "NOT_FOUND"
+    uri = found.get("uri")
+    conn.execute(
+        """
+        UPDATE entries
+        SET spotify_uri = ?, spotify_artist = ?, spotify_name = ?, spotify_link = ?,
+            match_status = ?, match_type = ?, failure_reason = ?
+        WHERE row_id = ?
+        """,
+        (
+            uri,
+            found.get("spotify_artist"),
+            found.get("spotify_name"),
+            found.get("spotify_link"),
+            status,
+            found.get("match_type"),
+            found.get("failure_reason"),
+            row_id,
+        ),
+    )
+    conn.execute("DELETE FROM tracks WHERE entry_id = ?", (row_id,))
+    if _is_track_uri(uri):
+        conn.execute(
+            """
+            INSERT INTO tracks (
+                track_id, entry_id, post_url, position, spotify_uri, spotify_artist,
+                spotify_name, spotify_link, duration_ms, track_number, disc_number
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                f"{row_id}:0",
+                row_id,
+                post_url,
+                0,
+                uri,
+                found.get("spotify_artist"),
+                found.get("spotify_name"),
+                found.get("spotify_link"),
+                None,
+                None,
+                None,
+            ),
+        )
+
+
+def cache_is_stale(hours=8, db_path=None):
+    """Return True when the cache has never been refreshed or is older than hours."""
+    with connect(db_path) as conn:
+        meta = _read_cache_meta(conn)
+    refreshed_at = meta.get("refreshed_at") or ""
+    if not refreshed_at:
+        return True
+    try:
+        refreshed = datetime.fromisoformat(refreshed_at)
+    except ValueError:
+        return True
+    return datetime.now() - refreshed >= timedelta(hours=hours)
+
+
+def last_refreshed_at(db_path=None):
+    with connect(db_path) as conn:
+        meta = _read_cache_meta(conn)
+    return meta.get("refreshed_at") or ""
+
+
+def has_cached_post(url, db_path=None):
+    if not url:
+        return False
+    with connect(db_path) as conn:
+        row = conn.execute("SELECT 1 FROM posts WHERE url = ? LIMIT 1", (url,)).fetchone()
+    return row is not None
+
+
+def latest_cached_post(db_path=None):
+    """Return (post, entries) for the newest cached post, or (None, []) if empty."""
+    ensure_cache_seeded(db_path)
+    with connect(db_path) as conn:
+        posts = _read_posts(conn)
+        if not posts:
+            return None, []
+        latest = posts[0]
+        entries = _read_entries(conn, latest["url"])
+    return latest, entries
 
 
 def import_seed(conn, payload):

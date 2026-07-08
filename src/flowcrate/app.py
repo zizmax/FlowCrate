@@ -8,13 +8,22 @@ from datetime import datetime
 from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 
 from . import __version__, sonos
-from .cache import dashboard_data, playlist_name_for_selection, refresh_from_flowstate, selected_track_uris
+from .cache import (
+    cache_is_stale,
+    dashboard_data,
+    has_cached_post,
+    last_refreshed_at,
+    latest_cached_post,
+    playlist_name_for_selection,
+    refresh_from_flowstate,
+    selected_track_uris,
+)
 from .config import load_config, masked, reset_local_config, save_config
 from .logs import list_logs, read_log
 from .paths import CONFIG_FILE, LOGS_DIR, PROJECT_ROOT, TOKEN_CACHE, ensure_dirs
 from .playback import DevicePickerRequired, resolve_playback_target
-from .scraper import extract_source_post, get_recent_posts, reset_session_cache, test_flowstate_fetch
-from .spotify import SpotifyManager, SpotifyRateLimitError, parse_spotify_url
+from .scraper import get_recent_posts, reset_session_cache, test_flowstate_fetch
+from .spotify import SpotifyManager, SpotifyRateLimitError
 from .workflow import (
     JobStatus,
     load_preview,
@@ -28,6 +37,38 @@ from .workflow import (
 
 JOBS = {}
 JOBS_LOCK = threading.Lock()
+
+# Single-flight background refresh: page load, tab focus, and the API may all trigger
+# at once; only one refresh ever runs at a time.
+_REFRESH_LOCK = threading.Lock()
+_REFRESH_STATE = {"running": False}
+
+
+def _start_background_refresh(limit=11):
+    """Start a daemon refresh thread unless one is already running. Returns started?"""
+    with _REFRESH_LOCK:
+        if _REFRESH_STATE["running"]:
+            return False
+        _REFRESH_STATE["running"] = True
+    thread = threading.Thread(target=_background_refresh_worker, args=(limit,), daemon=True)
+    thread.start()
+    return True
+
+
+def _background_refresh_worker(limit):
+    try:
+        refresh_from_flowstate(limit=limit)
+    except Exception:
+        logging.exception("Background Flow State refresh failed")
+    finally:
+        with _REFRESH_LOCK:
+            _REFRESH_STATE["running"] = False
+
+
+def _refresh_status():
+    with _REFRESH_LOCK:
+        running = _REFRESH_STATE["running"]
+    return {"refreshing": running, "refreshed_at": last_refreshed_at(), "stale": cache_is_stale()}
 
 
 def create_app():
@@ -53,7 +94,18 @@ def create_app():
 
     @app.route("/")
     def index():
+        if cache_is_stale():
+            _start_background_refresh(limit=11)
         return _render_dashboard()
+
+    @app.route("/api/refresh-status")
+    def api_refresh_status():
+        return jsonify(_refresh_status())
+
+    @app.route("/api/refresh", methods=["POST"])
+    def api_refresh():
+        _start_background_refresh(limit=11)
+        return jsonify(_refresh_status())
 
     @app.route("/refresh", methods=["POST"])
     def refresh_dashboard():
@@ -304,14 +356,12 @@ def create_app():
         room = (body.get("room") or "").strip() or cfg.sonos_room or None
 
         try:
-            posts = get_recent_posts(limit=1)
-            if not posts:
+            _ensure_latest_cached()
+            post, entries = latest_cached_post()
+            if not post:
                 raise RuntimeError("No Flow State posts were found.")
-            post = posts[0]
-            parsed = extract_source_post(post["url"])
-            items = parsed.get("items", [])
         except Exception as exc:
-            logging.exception("api/play-latest scrape failed")
+            logging.exception("api/play-latest cache read failed")
             return (
                 jsonify(
                     {
@@ -323,7 +373,8 @@ def create_app():
                 502,
             )
 
-        resolved, unresolved, search_unavailable = resolve_post_items(items)
+        resolved = [(entry, entry["spotify_uri"]) for entry in entries if entry.get("spotify_uri")]
+        unresolved = [entry for entry in entries if not entry.get("spotify_uri")]
         if not resolved:
             return (
                 jsonify(
@@ -364,7 +415,7 @@ def create_app():
             )
 
         artists = _unique_artists(resolved)
-        speak = _build_speak(post, result, len(unresolved), search_unavailable)
+        speak = _build_speak(post, result, len(unresolved), False)
         return jsonify(
             {
                 "ok": True,
@@ -380,50 +431,28 @@ def create_app():
     return app
 
 
-def resolve_post_items(items):
-    """Resolve post items to Spotify URIs without failing on missing credentials.
+def _ensure_latest_cached():
+    """Refresh the cache when it is stale or the newest live post is not cached yet.
 
-    Direct spotify_link values become URIs for free. Items without a direct link
-    fall back to a Spotify search, constructing SpotifyManager lazily and only once.
-    If SpotifyManager cannot be built (no credentials), unlinked items go unresolved.
-
-    Returns (resolved, unresolved, search_unavailable) where resolved is a list of
-    (item, uri) pairs and search_unavailable is True when a search was needed but
-    Spotify was not configured.
+    Keeps api/play-latest cheap: a full refresh only runs when needed, and the
+    latest-post probe is a single lightweight request.
     """
-    resolved = []
-    unresolved = []
-    searcher = None  # None = not yet built, False = unavailable
-    search_unavailable = False
-    for item in items:
-        parsed = parse_spotify_url(item.get("spotify_link"))
-        if parsed:
-            resolved.append((item, parsed["uri"]))
-            continue
-        if searcher is None:
-            try:
-                searcher = SpotifyManager()
-            except Exception as exc:
-                logging.warning("Spotify search unavailable for api/play-latest: %s", exc)
-                searcher = False
-                search_unavailable = True
-        if searcher:
-            try:
-                found = searcher.search_item(item.get("artist"), item.get("name"), item.get("type", "track"))
-            except Exception as exc:
-                logging.warning("Spotify search failed for %s: %s", item.get("name"), exc)
-                found = None
-            if found and found.get("status") == "FOUND":
-                resolved.append((item, found["uri"]))
-                continue
-        unresolved.append(item)
-    return resolved, unresolved, search_unavailable
+    if cache_is_stale():
+        refresh_from_flowstate(limit=2)
+        return
+    try:
+        recent = get_recent_posts(limit=1)
+    except Exception as exc:
+        logging.warning("api/play-latest latest-post check failed: %s", exc)
+        return
+    if recent and not has_cached_post(recent[0].get("url")):
+        refresh_from_flowstate(limit=2)
 
 
 def _unique_artists(resolved, limit=8):
     artists = []
     for item, _ in resolved:
-        artist = (item.get("artist") or "").strip()
+        artist = (item.get("spotify_artist") or item.get("artist") or item.get("parsed_artist") or "").strip()
         if artist and artist not in artists:
             artists.append(artist)
         if len(artists) >= limit:
@@ -451,10 +480,13 @@ def _build_speak(post, result, unresolved_count, search_unavailable):
 
 def _render_dashboard(device_picker=None):
     data = dashboard_data()
+    status = _refresh_status()
     return render_template(
         "dashboard.html",
         dashboard=data,
         device_picker=device_picker,
+        refreshing=status["refreshing"],
+        cache_stale=cache_is_stale(),
     )
 
 
