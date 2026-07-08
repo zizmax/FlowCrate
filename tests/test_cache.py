@@ -12,7 +12,6 @@ from flowcrate.cache import (
     cache_is_stale,
     connect,
     dashboard_data,
-    import_seed,
     latest_cached_post,
     parse_metadata,
     refresh_from_flowstate,
@@ -32,18 +31,18 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(parsed["notes"], "no vocals, ambient")
         self.assertEqual(parsed["raw_metadata"], "39m, no vocals, ambient")
 
-    def test_seed_import_is_idempotent_and_reads_dashboard(self):
+    def test_cache_replace_is_idempotent_and_reads_dashboard(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "flowcrate.db"
             payload = _seed_payload()
 
             with connect(db_path) as conn:
-                import_seed(conn, payload)
-                import_seed(conn, payload)
+                replace_cache(conn, payload)
+                replace_cache(conn, payload)
 
             data = dashboard_data(db_path)
             self.assertEqual(data["latest"]["title"], "Latest")
-            self.assertEqual(data["cache_status"]["state"], "seed")
+            self.assertEqual(data["cache_status"]["state"], "stale")
             self.assertTrue(data["cache_status"]["needs_refresh"])
             self.assertEqual(len(data["latest_entries"]), 1)
             self.assertEqual(data["latest_summary"]["track_count"], 2)
@@ -65,7 +64,7 @@ class CacheTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "flowcrate.db"
             with connect(db_path) as conn:
-                import_seed(conn, _two_post_payload())
+                replace_cache(conn,_two_post_payload())
 
             data = dashboard_data(db_path)
 
@@ -79,7 +78,7 @@ class CacheTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "flowcrate.db"
             with connect(db_path) as conn:
-                import_seed(conn, _seed_payload())
+                replace_cache(conn,_seed_payload())
 
             uris = selected_track_uris(["entry-latest"], db_path)
 
@@ -89,7 +88,7 @@ class CacheTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "flowcrate.db"
             with connect(db_path) as conn:
-                import_seed(conn, _two_post_payload())
+                replace_cache(conn,_two_post_payload())
 
             uris = selected_track_uris(["entry-previous", "entry-latest"], db_path)
 
@@ -170,7 +169,7 @@ class CacheTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "flowcrate.db"
             with connect(db_path) as conn:
-                import_seed(conn, _linked_album_payload())
+                replace_cache(conn,_linked_album_payload())
 
             spotify = Mock()
             spotify.get_album_track_rows.return_value = [
@@ -212,14 +211,14 @@ class StalenessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "flowcrate.db"
             with connect(db_path) as conn:
-                import_seed(conn, _seed_payload())
+                replace_cache(conn,_seed_payload())
             self.assertTrue(cache_is_stale(hours=8, db_path=db_path))
 
     def test_recent_refresh_is_not_stale_and_old_refresh_is_stale(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "flowcrate.db"
             with connect(db_path) as conn:
-                import_seed(conn, _seed_payload())
+                replace_cache(conn,_seed_payload())
 
             fresh = (datetime.now() - timedelta(hours=7, minutes=59)).isoformat(timespec="seconds")
             stale = (datetime.now() - timedelta(hours=8, minutes=1)).isoformat(timespec="seconds")
@@ -238,7 +237,7 @@ class StalenessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "flowcrate.db"
             with connect(db_path) as conn:
-                import_seed(conn, _two_post_payload())
+                replace_cache(conn,_two_post_payload())
             post, entries = latest_cached_post(db_path=db_path)
         self.assertEqual(post["title"], "Latest")
         self.assertEqual([entry["row_id"] for entry in entries], ["entry-latest"])

@@ -21,42 +21,68 @@ _session_cache = None
 
 
 def get_session():
-    """Return a requests session using browser cookies when available, then public access."""
-    global _session_cache
-    if _session_cache:
-        return _session_cache
+    """Return the cached requests session, building a plain unauthenticated one first.
 
-    load_dotenv()
+    Browser cookies and SUBSTACK_SID are never loaded eagerly: reading browser
+    cookies triggers scary macOS keychain prompts. Authenticated sessions are only
+    built on demand in ``get_post_snapshot`` when a fetch fails or the page looks
+    paywalled, and the session that works is cached for reuse.
+    """
+    global _session_cache
+    if _session_cache is None:
+        load_dotenv()
+        _session_cache = _plain_session()
+        logging.info("Using unauthenticated Substack session.")
+    return _session_cache
+
+
+def _plain_session():
     session = requests.Session()
     _apply_default_headers(session)
+    return session
 
-    if browser_cookie3:
-        loaded = False
-        loaders = [
-            ("Chrome", getattr(browser_cookie3, "chrome", None)),
-            ("Firefox", getattr(browser_cookie3, "firefox", None)),
-            ("Safari", getattr(browser_cookie3, "safari", None)),
-            ("Brave", getattr(browser_cookie3, "brave", None)),
-            ("Edge", getattr(browser_cookie3, "edge", None)),
-            ("Chromium", getattr(browser_cookie3, "chromium", None)),
-        ]
-        for browser_name, loader in loaders:
-            if not loader:
-                continue
-            try:
-                logging.info("Attempting to load Substack cookies from %s.", browser_name)
-                session.cookies.update(loader(domain_name="substack.com"))
-                session.cookies.update(loader(domain_name="flowstate.fm"))
-                loaded = True
-                logging.info("Loaded Substack cookies from %s.", browser_name)
-            except Exception as exc:
-                logging.debug("Could not load %s cookies: %s", browser_name, exc)
-        if loaded:
-            _session_cache = session
-            return session
 
-    logging.info("Using unauthenticated Substack session.")
-    _session_cache = session
+def _browser_cookie_session():
+    """Build a session authenticated with browser_cookie3 cookies, or None.
+
+    This reads the local browser cookie stores (and may prompt for keychain
+    access on macOS), so it is only ever called as a paywall fallback.
+    """
+    if not browser_cookie3:
+        return None
+    session = _plain_session()
+    loaders = [
+        ("Chrome", getattr(browser_cookie3, "chrome", None)),
+        ("Firefox", getattr(browser_cookie3, "firefox", None)),
+        ("Safari", getattr(browser_cookie3, "safari", None)),
+        ("Brave", getattr(browser_cookie3, "brave", None)),
+        ("Edge", getattr(browser_cookie3, "edge", None)),
+        ("Chromium", getattr(browser_cookie3, "chromium", None)),
+    ]
+    loaded = False
+    for browser_name, loader in loaders:
+        if not loader:
+            continue
+        try:
+            logging.info("Attempting to load Substack cookies from %s.", browser_name)
+            session.cookies.update(loader(domain_name="substack.com"))
+            session.cookies.update(loader(domain_name="flowstate.fm"))
+            loaded = True
+            logging.info("Loaded Substack cookies from %s.", browser_name)
+        except Exception as exc:
+            logging.debug("Could not load %s cookies: %s", browser_name, exc)
+    return session if loaded else None
+
+
+def _sid_session():
+    """Build a session authenticated with the configured SUBSTACK_SID, or None."""
+    cfg = load_config()
+    sid = cfg.substack_sid or os.getenv("SUBSTACK_SID")
+    if not sid:
+        return None
+    logging.info("Building Flow State session with SUBSTACK_SID fallback.")
+    session = _plain_session()
+    session.cookies.set("substack.sid", sid, domain=".substack.com")
     return session
 
 
@@ -73,17 +99,15 @@ def get_soup(url):
 
 
 def get_post_snapshot(url):
-    """Fetch one Flow State URL and return raw HTML plus parsed metadata."""
-    try:
-        response = get_session().get(url, timeout=30)
-        response.raise_for_status()
-        raw_html = response.text
-    except Exception as exc:
-        logging.warning("Primary Flow State fetch failed for %s: %s", url, exc)
-        raw_html = _get_html_with_sid(url)
-        if not raw_html:
-            logging.error("Error fetching %s: %s", url, exc)
-            return None
+    """Fetch one Flow State URL and return raw HTML plus parsed metadata.
+
+    Starts with the plain unauthenticated session. Only if that fetch fails or the
+    page looks paywalled do we retry with browser cookies, then SUBSTACK_SID; the
+    session that works is cached for subsequent requests.
+    """
+    raw_html = _fetch_snapshot_html(url)
+    if not raw_html:
+        return None
 
     soup = BeautifulSoup(raw_html, "html.parser")
     title_tag = soup.find("h1", class_="post-title") or soup.find("h1")
@@ -97,22 +121,67 @@ def get_post_snapshot(url):
     }
 
 
-def _get_html_with_sid(url):
-    cfg = load_config()
-    sid = cfg.substack_sid or os.getenv("SUBSTACK_SID")
-    if not sid:
-        return None
+def _fetch_snapshot_html(url):
+    """Fetch HTML for url, escalating auth only when needed. Caches the working session."""
+    global _session_cache
+    html = _get_html(get_session(), url)
+    if html is not None and not _looks_paywalled_html(html):
+        return html
+    if html is None:
+        logging.warning("Unauthenticated Flow State fetch failed for %s; trying authenticated fallbacks.", url)
+    else:
+        logging.info("Flow State page for %s looks paywalled; trying authenticated fallbacks.", url)
+
+    for builder in (_browser_cookie_session, _sid_session):
+        candidate = builder()
+        if candidate is None:
+            continue
+        retry = _get_html(candidate, url)
+        if retry is None:
+            continue
+        if not _looks_paywalled_html(retry):
+            _session_cache = candidate
+            return retry
+        if html is None:
+            html = retry
+    return html
+
+
+def _get_html(session, url):
     try:
-        logging.info("Retrying Flow State fetch with SUBSTACK_SID fallback.")
-        session = requests.Session()
-        _apply_default_headers(session)
-        session.cookies.set("substack.sid", sid, domain=".substack.com")
         response = session.get(url, timeout=30)
         response.raise_for_status()
         return response.text
     except Exception as exc:
-        logging.error("SUBSTACK_SID fallback failed for %s: %s", url, exc)
+        logging.warning("Flow State fetch failed for %s: %s", url, exc)
         return None
+
+
+def _looks_paywalled_html(raw_html):
+    return _looks_paywalled(BeautifulSoup(raw_html, "html.parser")) if raw_html else False
+
+
+def _looks_paywalled(soup):
+    """Return True when the page shows a Substack paywall gate instead of full content.
+
+    Substack renders the gate in a container with a ``paywall`` class or testid and a
+    "Subscribe to keep reading"-style call to action, so we look for both patterns.
+    """
+    if soup is None:
+        return False
+    if soup.find(class_=re.compile(r"paywall", re.I)):
+        return True
+    for attr in ("data-testid", "data-component-name"):
+        if soup.find(attrs={attr: re.compile(r"paywall", re.I)}):
+            return True
+    text = soup.get_text(" ", strip=True).lower()
+    gate_phrases = (
+        "subscribe to keep reading",
+        "this post is for paid subscribers",
+        "this post is for paying subscribers",
+        "keep reading with a 7-day free trial",
+    )
+    return any(phrase in text for phrase in gate_phrases)
 
 
 def _apply_default_headers(session):
@@ -124,11 +193,6 @@ def _apply_default_headers(session):
             )
         }
     )
-
-
-def _get_soup_with_sid(url):
-    raw_html = _get_html_with_sid(url)
-    return BeautifulSoup(raw_html, "html.parser") if raw_html else None
 
 
 def test_flowstate_fetch():
@@ -146,7 +210,7 @@ def test_flowstate_fetch():
     return {
         "ok": True,
         "title": title or "Flow State",
-        "mode": "Browser cookies, configured SID, or public access",
+        "mode": "Public access (browser cookies or SID used only if paywalled)",
     }
 
 

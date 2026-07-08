@@ -1,15 +1,12 @@
-import json
 import logging
 import re
 import sqlite3
 from hashlib import sha256
 from datetime import datetime, timedelta
 
-from .paths import FLOWCRATE_DB, PROJECT_ROOT, SEEDS_DIR, ensure_dirs
+from .paths import FLOWCRATE_DB, ensure_dirs
 from .scraper import extract_source_post, get_recent_posts
 from .spotify import SpotifyManager, SpotifyRateLimitError, parse_spotify_url, spotify_service_state
-
-SEED_FILE = SEEDS_DIR / "flowstate_recent_seed.json"
 
 
 def connect(db_path=None):
@@ -20,18 +17,7 @@ def connect(db_path=None):
     return conn
 
 
-def ensure_cache_seeded(db_path=None):
-    with connect(db_path) as conn:
-        if _has_posts(conn):
-            return
-        if SEED_FILE.exists():
-            import_seed(conn, json.loads(SEED_FILE.read_text(encoding="utf-8")))
-        else:
-            _import_preview_fallback(conn)
-
-
 def dashboard_data(db_path=None):
-    ensure_cache_seeded(db_path)
     with connect(db_path) as conn:
         posts = _read_posts(conn)
         latest = posts[0] if posts else None
@@ -236,7 +222,6 @@ def has_cached_post(url, db_path=None):
 
 def latest_cached_post(db_path=None):
     """Return (post, entries) for the newest cached post, or (None, []) if empty."""
-    ensure_cache_seeded(db_path)
     with connect(db_path) as conn:
         posts = _read_posts(conn)
         if not posts:
@@ -244,10 +229,6 @@ def latest_cached_post(db_path=None):
         latest = posts[0]
         entries = _read_entries(conn, latest["url"])
     return latest, entries
-
-
-def import_seed(conn, payload):
-    replace_cache(conn, payload, cache_source="seed")
 
 
 def replace_cache(conn, payload, cache_source=None):
@@ -297,8 +278,6 @@ def replace_cache(conn, payload, cache_source=None):
     _set_cache_meta(conn, "updated_at", now)
     if source == "flowstate":
         _set_cache_meta(conn, "refreshed_at", now)
-    elif source == "seed":
-        _set_cache_meta(conn, "seeded_at", now)
     conn.commit()
 
 
@@ -703,10 +682,6 @@ def _init_schema(conn):
     _ensure_column(conn, "posts", "raw_source_html", "TEXT")
 
 
-def _has_posts(conn):
-    return conn.execute("SELECT 1 FROM posts LIMIT 1").fetchone() is not None
-
-
 def _ensure_column(conn, table, column, definition):
     columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in columns:
@@ -846,30 +821,6 @@ def _content_hash(raw_html):
     return sha256((raw_html or "").encode("utf-8")).hexdigest() if raw_html else ""
 
 
-def _import_preview_fallback(conn):
-    preview_dir = PROJECT_ROOT / "data" / "previews"
-    posts = []
-    seen = set()
-    for path in sorted(preview_dir.glob("*.json"), reverse=True):
-        preview = json.loads(path.read_text(encoding="utf-8"))
-        source_posts = preview.get("source_preset", {}).get("posts") or []
-        post = source_posts[0] if source_posts else {}
-        url = (post.get("url") or (preview.get("urls") or [""])[0]).strip()
-        if not url or url in seen:
-            continue
-        seen.add(url)
-        posts.append(
-            {
-                "title": post.get("title") or preview.get("playlist_name") or "Flow State post",
-                "url": url,
-                "date": post.get("date") or _first_source_date(preview.get("results", [])),
-                "entries": preview.get("results", []),
-            }
-        )
-    posts.sort(key=lambda post: post.get("date") or "", reverse=True)
-    replace_cache(conn, {"posts": posts[:11]}, cache_source="seed")
-
-
 def _set_cache_meta(conn, key, value):
     conn.execute(
         """
@@ -889,7 +840,6 @@ def _read_cache_meta(conn):
 def _cache_status(meta, posts):
     source = meta.get("cache_source") or ""
     refreshed_at = meta.get("refreshed_at") or ""
-    seeded_at = meta.get("seeded_at") or ""
     fallback_updated_at = posts[0]["fetched_at"] if posts else ""
     if source == "flowstate" and refreshed_at:
         return {
@@ -898,14 +848,6 @@ def _cache_status(meta, posts):
             "value": refreshed_at,
             "needs_refresh": False,
             "is_seeded": False,
-        }
-    if source == "seed":
-        return {
-            "state": "seed",
-            "label": "Seeded sample data",
-            "value": seeded_at or fallback_updated_at,
-            "needs_refresh": True,
-            "is_seeded": True,
         }
     return {
         "state": "stale",
@@ -919,13 +861,6 @@ def _cache_status(meta, posts):
 def _metadata_from_raw(raw_text):
     match = re.search(r"\((.*?)\)", raw_text or "")
     return match.group(1) if match else ""
-
-
-def _first_source_date(entries):
-    for entry in entries:
-        if entry.get("source_date"):
-            return entry["source_date"]
-    return ""
 
 
 def _duration_from_entry_minutes(entries):

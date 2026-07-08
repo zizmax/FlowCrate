@@ -8,7 +8,7 @@
   <form method="post" class="stack">
     <div class="section-heading">
       <h2>Spotify</h2>
-      <p class="muted">Required for preview, matching, playlist creation, and queue actions.</p>
+      <p class="muted">Required for matching, playback, queue, and playlist actions.</p>
     </div>
     <label>
       Spotify Client ID
@@ -32,7 +32,7 @@
 
     <details class="advanced">
       <summary>Substack fallback</summary>
-      <p class="muted">Substack SID is optional. Flow Crate first tries browser-cookie discovery and public Flow State access. Use SID only as a fallback for private posts your browser cookies cannot reach.</p>
+      <p class="muted">Substack SID is optional. Flow Crate reads Flow State over public access by default and never touches your browser cookies unless a post appears paywalled. Only if a fetch is blocked does it retry with browser cookies and then this SID.</p>
       <label>
         Substack SID
         <input name="SUBSTACK_SID" type="password" value="{{ cfg.substack_sid }}">
@@ -94,6 +94,7 @@
 
   <div class="status-block">
     <h2>Status</h2>
+    <p class="muted"><a href="{{ url_for('logs') }}">Run logs</a></p>
     <table>
       <thead><tr><th>Check</th><th>Value</th><th>State</th></tr></thead>
       <tbody>

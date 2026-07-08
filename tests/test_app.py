@@ -22,7 +22,6 @@ class AppTests(unittest.TestCase):
         self.assertNotIn("Latest Entries", html)
         self.assertNotIn("Play Now", html)
         self.assertIn('class="play-button"', html)
-        self.assertIn("Seeded sample data", html)
         self.assertIn("Refresh explicitly", html)
         self.assertIn("select-all", html)
         self.assertIn("post-group-row", html)
@@ -182,11 +181,11 @@ def _dashboard_payload():
         ],
         "cache_path": "/tmp/flowcrate.db",
         "cache_status": {
-            "state": "seed",
-            "label": "Seeded sample data",
+            "state": "stale",
+            "label": "Needs refresh",
             "value": "2026-05-22T09:00:00",
             "needs_refresh": True,
-            "is_seeded": True,
+            "is_seeded": False,
         },
         "spotify_state": {"active": False, "message": ""},
         "latest_summary": {"entry_count": 1, "linked_count": 0, "actionable_count": 1, "track_count": 9, "duration": "61m", "notes": "no vocals"},
