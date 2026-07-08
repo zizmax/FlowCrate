@@ -11,6 +11,9 @@ KNOWN_KEYS = [
     "SPOTIFY_CLIENT_SECRET",
     "SPOTIFY_REDIRECT_URI",
     "SUBSTACK_SID",
+    "SONOS_IP",
+    "SONOS_ROOM",
+    "API_TOKEN",
 ]
 LEGACY_ENV_KEYS = [
     "SPOTIPY_CLIENT_ID",
@@ -25,6 +28,9 @@ class AppConfig:
     spotify_client_secret: str = ""
     spotify_redirect_uri: str = "http://127.0.0.1:8888/callback"
     substack_sid: str = ""
+    sonos_ip: str = ""
+    sonos_room: str = ""
+    api_token: str = ""
 
     @property
     def spotify_ready(self):
@@ -37,6 +43,9 @@ class AppConfig:
             "SPOTIFY_CLIENT_SECRET": self.spotify_client_secret,
             "SPOTIFY_REDIRECT_URI": self.spotify_redirect_uri,
             "SUBSTACK_SID": self.substack_sid,
+            "SONOS_IP": self.sonos_ip,
+            "SONOS_ROOM": self.sonos_room,
+            "API_TOKEN": self.api_token,
         }
 
 
@@ -52,6 +61,9 @@ def load_config():
             or "http://127.0.0.1:8888/callback"
         ),
         substack_sid=os.getenv("SUBSTACK_SID", ""),
+        sonos_ip=os.getenv("SONOS_IP", ""),
+        sonos_room=os.getenv("SONOS_ROOM", ""),
+        api_token=os.getenv("API_TOKEN", ""),
     )
 
 

@@ -5,16 +5,16 @@ import time
 import webbrowser
 from datetime import datetime
 
-from flask import Flask, flash, redirect, render_template, request, url_for
+from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 
-from . import __version__
+from . import __version__, sonos
 from .cache import dashboard_data, playlist_name_for_selection, refresh_from_flowstate, selected_track_uris
 from .config import load_config, masked, reset_local_config, save_config
 from .logs import list_logs, read_log
 from .paths import CONFIG_FILE, LOGS_DIR, PROJECT_ROOT, TOKEN_CACHE, ensure_dirs
 from .playback import DevicePickerRequired, resolve_playback_target
-from .scraper import reset_session_cache, test_flowstate_fetch
-from .spotify import SpotifyManager, SpotifyRateLimitError
+from .scraper import extract_source_post, get_recent_posts, reset_session_cache, test_flowstate_fetch
+from .spotify import SpotifyManager, SpotifyRateLimitError, parse_spotify_url
 from .workflow import (
     JobStatus,
     load_preview,
@@ -273,7 +273,180 @@ def create_app():
     def status():
         return redirect(url_for("settings"))
 
+    @app.route("/api/play-latest", methods=["POST"])
+    def api_play_latest():
+        cfg = load_config()
+        if not cfg.api_token:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "API access is not configured.",
+                        "speak": "Flow Crate is not set up for Siri yet. Set an API token in Settings.",
+                    }
+                ),
+                403,
+            )
+        if request.headers.get("X-FlowCrate-Token") != cfg.api_token:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "Invalid or missing API token.",
+                        "speak": "Sorry, Flow Crate could not verify that request.",
+                    }
+                ),
+                401,
+            )
+
+        body = request.get_json(silent=True) or {}
+        play = body.get("play", True)
+        room = (body.get("room") or "").strip() or cfg.sonos_room or None
+
+        try:
+            posts = get_recent_posts(limit=1)
+            if not posts:
+                raise RuntimeError("No Flow State posts were found.")
+            post = posts[0]
+            parsed = extract_source_post(post["url"])
+            items = parsed.get("items", [])
+        except Exception as exc:
+            logging.exception("api/play-latest scrape failed")
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": f"Could not read the latest Flow State post: {exc}",
+                        "speak": "Sorry, Flow Crate could not read the latest Flow State post.",
+                    }
+                ),
+                502,
+            )
+
+        resolved, unresolved, search_unavailable = resolve_post_items(items)
+        if not resolved:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": "No playable Spotify tracks were found in the latest post.",
+                        "speak": "Sorry, Flow Crate found no playable tracks in the latest post.",
+                    }
+                ),
+                400,
+            )
+
+        try:
+            speaker = sonos.get_speaker(ip=cfg.sonos_ip or None, room=room)
+            result = sonos.queue_and_play(speaker, [uri for _, uri in resolved], play=play)
+        except sonos.SonosError as exc:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": str(exc),
+                        "speak": f"Sorry, Flow Crate could not reach your Sonos. {exc}",
+                    }
+                ),
+                502,
+            )
+        except Exception as exc:
+            logging.exception("api/play-latest Sonos playback failed")
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": f"Sonos playback failed: {exc}",
+                        "speak": "Sorry, Flow Crate could not play on your Sonos.",
+                    }
+                ),
+                502,
+            )
+
+        artists = _unique_artists(resolved)
+        speak = _build_speak(post, result, len(unresolved), search_unavailable)
+        return jsonify(
+            {
+                "ok": True,
+                "post": {"title": post.get("title", ""), "date": post.get("date", ""), "url": post.get("url", "")},
+                "queued": result["queued"],
+                "unresolved": len(unresolved),
+                "room": result["room"],
+                "artists": artists,
+                "speak": speak,
+            }
+        )
+
     return app
+
+
+def resolve_post_items(items):
+    """Resolve post items to Spotify URIs without failing on missing credentials.
+
+    Direct spotify_link values become URIs for free. Items without a direct link
+    fall back to a Spotify search, constructing SpotifyManager lazily and only once.
+    If SpotifyManager cannot be built (no credentials), unlinked items go unresolved.
+
+    Returns (resolved, unresolved, search_unavailable) where resolved is a list of
+    (item, uri) pairs and search_unavailable is True when a search was needed but
+    Spotify was not configured.
+    """
+    resolved = []
+    unresolved = []
+    searcher = None  # None = not yet built, False = unavailable
+    search_unavailable = False
+    for item in items:
+        parsed = parse_spotify_url(item.get("spotify_link"))
+        if parsed:
+            resolved.append((item, parsed["uri"]))
+            continue
+        if searcher is None:
+            try:
+                searcher = SpotifyManager()
+            except Exception as exc:
+                logging.warning("Spotify search unavailable for api/play-latest: %s", exc)
+                searcher = False
+                search_unavailable = True
+        if searcher:
+            try:
+                found = searcher.search_item(item.get("artist"), item.get("name"), item.get("type", "track"))
+            except Exception as exc:
+                logging.warning("Spotify search failed for %s: %s", item.get("name"), exc)
+                found = None
+            if found and found.get("status") == "FOUND":
+                resolved.append((item, found["uri"]))
+                continue
+        unresolved.append(item)
+    return resolved, unresolved, search_unavailable
+
+
+def _unique_artists(resolved, limit=8):
+    artists = []
+    for item, _ in resolved:
+        artist = (item.get("artist") or "").strip()
+        if artist and artist not in artists:
+            artists.append(artist)
+        if len(artists) >= limit:
+            break
+    return artists
+
+
+def _build_speak(post, result, unresolved_count, search_unavailable):
+    title = post.get("title") or "the latest Flow State post"
+    date = post.get("date") or ""
+    queued = result["queued"]
+    room = result["room"]
+    track_word = "track" if queued == 1 else "tracks"
+    if date:
+        speak = f"Playing {title} from {date}. {queued} {track_word} on {room}."
+    else:
+        speak = f"Playing {title}. {queued} {track_word} on {room}."
+    if unresolved_count > 0:
+        skipped_word = "track was" if unresolved_count == 1 else "tracks were"
+        speak += f" {unresolved_count} {skipped_word} skipped."
+        if search_unavailable:
+            speak += " Connect Spotify to resolve unlinked tracks."
+    return speak
 
 
 def _render_dashboard(device_picker=None):

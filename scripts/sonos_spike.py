@@ -55,25 +55,29 @@ def resolve_uris(items):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--room", help="Sonos room/speaker name to play on")
+    parser.add_argument("--ip", help="Connect to a speaker by IP, skipping discovery (e.g. 192.168.0.34)")
     parser.add_argument("--no-play", action="store_true", help="Queue only, don't start playback")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.WARNING)
-    speakers = discover_speakers()
+    speakers = [soco.SoCo(args.ip)] if args.ip else discover_speakers()
     if not speakers:
         sys.exit("No Sonos speakers found. Are you on the home Wi-Fi? Check Local Network permission.")
 
     print("Speakers found:")
     for z in speakers:
         print(f"  - {z.player_name} ({z.ip_address}), coordinator={z.group.coordinator.player_name}")
-    if not args.room:
-        print("\nRe-run with --room <name> to queue and play the latest post.")
+    if not args.room and not args.ip:
+        print("\nRe-run with --room <name> (or --ip <addr>) to queue and play the latest post.")
         return
 
-    matches = [z for z in speakers if z.player_name.lower() == args.room.lower()]
-    if not matches:
-        sys.exit(f"No speaker named {args.room!r}.")
-    speaker = matches[0].group.coordinator
+    if args.ip:
+        speaker = speakers[0].group.coordinator
+    else:
+        matches = [z for z in speakers if z.player_name.lower() == args.room.lower()]
+        if not matches:
+            sys.exit(f"No speaker named {args.room!r}.")
+        speaker = matches[0].group.coordinator
     print(f"\nTargeting {speaker.player_name} (group coordinator).")
 
     latest = get_recent_posts(limit=1)[0]
