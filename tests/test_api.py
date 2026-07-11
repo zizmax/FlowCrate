@@ -448,8 +448,9 @@ class SiriShortcutRouteTests(unittest.TestCase):
         self.assertFalse(data["ok"])
         self.assertIn("API token", data["error"])
 
-    def test_success_returns_signed_attachment(self):
+    def test_macos_returns_signed_attachment(self):
         with patch("flowcrate.app.load_config", return_value=_cfg()), \
+             patch("flowcrate.app.platform.system", return_value="Darwin"), \
              patch("flowcrate.app.signed_shortcut", return_value=b"SIGNED") as sign:
             response = self._app().test_client().get("/api/siri-shortcut")
         self.assertEqual(response.status_code, 200)
@@ -460,10 +461,32 @@ class SiriShortcutRouteTests(unittest.TestCase):
         url_arg = sign.call_args[0][0]
         self.assertIn("/api/play-latest", url_arg)
 
+    def test_non_macos_returns_unsigned_personalized(self):
+        import plistlib
+
+        with patch("flowcrate.app.load_config", return_value=_cfg(api_token="tok42")), \
+             patch("flowcrate.app.platform.system", return_value="Linux"):
+            response = self._app().test_client().get("/api/siri-shortcut")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Play Flow Crate.shortcut", response.headers["Content-Disposition"])
+        workflow = plistlib.loads(response.data)
+        params = workflow["WFWorkflowActions"][0]["WFWorkflowActionParameters"]
+        self.assertIn("/api/play-latest", params["WFURL"])
+        header = params["WFHTTPHeaders"]["Value"]["WFDictionaryFieldValueItems"][0]
+        self.assertEqual(header["WFValue"]["Value"]["string"], "tok42")
+
+    def test_universal_route_returns_bundled_attachment(self):
+        response = self._app().test_client().get("/api/siri-shortcut/universal")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Play Flow Crate.shortcut", response.headers["Content-Disposition"])
+        # The bundled file is a real signed shortcut (~22 KB), not a stub.
+        self.assertGreater(len(response.data), 1000)
+
     def test_502_on_shortcut_error(self):
         from flowcrate.shortcut import ShortcutError
 
         with patch("flowcrate.app.load_config", return_value=_cfg()), \
+             patch("flowcrate.app.platform.system", return_value="Darwin"), \
              patch("flowcrate.app.signed_shortcut", side_effect=ShortcutError("boom")):
             response = self._app().test_client().get("/api/siri-shortcut")
         self.assertEqual(response.status_code, 502)

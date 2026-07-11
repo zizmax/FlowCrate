@@ -131,15 +131,53 @@
     </div>
 
     <div class="siri-setup">
-      <p>
-        <a class="button primary" href="/api/siri-shortcut" download>Download Siri Shortcut</a>
-      </p>
-      <p class="muted">
-        Open this Settings page in Safari on your iPhone
-        (<code>http://{{ local_hostname }}:{{ local_port }}/settings</code>),
-        tap Download Siri Shortcut, open the downloaded file, then tap Add Shortcut.
-        Then say: "Hey Siri, Play Flow Crate".
-      </p>
+      {% if is_macos %}
+        <p>
+          <a class="button primary" href="/api/siri-shortcut" download>Download Siri Shortcut</a>
+        </p>
+        <p class="muted">
+          Open this Settings page in Safari on your iPhone
+          (<code>http://{{ local_hostname }}:{{ local_port }}/settings</code>),
+          tap Download Siri Shortcut, open the downloaded file, then tap Add Shortcut.
+          Then say: "Hey Siri, Play Flow Crate". The shortcut is signed on this Mac,
+          so it already has this install's address and token built in — nothing to edit.
+        </p>
+      {% else %}
+        <p class="muted">This machine can't sign a shortcut (that needs macOS), so pick
+          one of these. Open this page in Safari on your iPhone first
+          (<code>http://{{ local_hostname }}:{{ local_port }}/settings</code>).</p>
+
+        <div class="shortcut-option">
+          <p>
+            <a class="button primary" href="/api/siri-shortcut/universal" download>Download universal shortcut</a>
+            <span class="muted">Signed — imports with one tap, then you set the address + token.</span>
+          </p>
+          <ol class="muted">
+            <li>Tap the button, open the file, tap <strong>Add Shortcut</strong>.</li>
+            <li>Open the new <strong>Play Flow Crate</strong> shortcut and tap its
+              <strong>Get Contents of URL</strong> action.</li>
+            <li>Change the URL from
+              <code>http://{{ universal_host_placeholder }}/api/play-latest</code> to
+              <code>http://{{ local_hostname }}:{{ local_port }}/api/play-latest</code>.</li>
+            <li>Under Headers, change <code>X-FlowCrate-Token</code> from
+              <code>{{ universal_token }}</code> to your API token
+              {% if cfg.api_token %}(<code>{{ cfg.api_token }}</code>){% else %}(set one above first){% endif %}.</li>
+          </ol>
+        </div>
+
+        <div class="shortcut-option">
+          <p>
+            <a class="button" href="/api/siri-shortcut" download>Download ready-to-use (unsigned)</a>
+            <span class="muted">Already has your address + token — but unsigned.</span>
+          </p>
+          <ol class="muted">
+            <li>On the iPhone, enable <strong>Settings → Shortcuts → Allow Untrusted Shortcuts</strong>
+              (you may need to run any one shortcut once before the toggle appears).</li>
+            <li>Tap the button, open the file, scroll down and tap
+              <strong>Add Untrusted Shortcut</strong>. Nothing to edit — it just works.</li>
+          </ol>
+        </div>
+      {% endif %}
 
       <details class="advanced">
         <summary>Set up the Shortcut manually</summary>

@@ -19,6 +19,7 @@ from flask import (
     redirect,
     render_template,
     request,
+    send_file,
     url_for,
 )
 
@@ -45,7 +46,13 @@ from .scraper import (
     set_preferred_browser,
     test_flowstate_fetch,
 )
-from .shortcut import ShortcutError, signed_shortcut
+from .shortcut import (
+    UNIVERSAL_HOST_PLACEHOLDER,
+    UNIVERSAL_TOKEN,
+    ShortcutError,
+    signed_shortcut,
+    unsigned_shortcut,
+)
 from .spotify import SpotifyManager, SpotifyRateLimitError
 
 # Single-flight background refresh: page load, tab focus, and the API may all trigger
@@ -238,6 +245,9 @@ def create_app():
             test_results=test_results,
             local_hostname=_local_hostname(),
             local_port=_local_port(),
+            is_macos=platform.system() == "Darwin",
+            universal_host_placeholder=UNIVERSAL_HOST_PLACEHOLDER,
+            universal_token=UNIVERSAL_TOKEN,
         )
 
     @app.route("/api/test-substack", methods=["POST"])
@@ -444,18 +454,44 @@ def create_app():
 
     @app.route("/api/siri-shortcut")
     def api_siri_shortcut():
+        """Personalized shortcut with this install's real URL + token baked in.
+
+        On macOS we sign it (imports with no fuss). On any other host there's no
+        signer, so we return it unsigned — ready to use, but the device needs
+        "Allow Untrusted Shortcuts" enabled to import it.
+        """
         cfg = load_config()
         if not cfg.api_token:
             return jsonify({"ok": False, "error": "Set an API token in Settings first."}), 400
         url = f"http://{_local_hostname()}:{_local_port()}/api/play-latest"
-        try:
-            data = signed_shortcut(url, cfg.api_token)
-        except ShortcutError as exc:
-            return jsonify({"ok": False, "error": str(exc)}), 502
+        if platform.system() == "Darwin":
+            try:
+                data = signed_shortcut(url, cfg.api_token)
+            except ShortcutError as exc:
+                return jsonify({"ok": False, "error": str(exc)}), 502
+        else:
+            data = unsigned_shortcut(url, cfg.api_token)
         return Response(
             data,
             mimetype="application/octet-stream",
             headers={"Content-Disposition": 'attachment; filename="Play Flow Crate.shortcut"'},
+        )
+
+    @app.route("/api/siri-shortcut/universal")
+    def api_siri_shortcut_universal():
+        """Pre-signed universal shortcut (placeholder URL/token, edited on-device).
+
+        Lets a non-macOS host still offer a one-tap, iOS-Safari-importable signed
+        shortcut; the user swaps in their host + token once after importing.
+        """
+        path = os.path.join(app.static_folder, "play-flow-crate-universal.shortcut")
+        if not os.path.exists(path):
+            return jsonify({"ok": False, "error": "Universal shortcut is not bundled in this build."}), 404
+        return send_file(
+            path,
+            mimetype="application/octet-stream",
+            as_attachment=True,
+            download_name="Play Flow Crate.shortcut",
         )
 
     return app

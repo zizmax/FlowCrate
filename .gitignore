@@ -15,3 +15,6 @@ samples/
 # Personal/dev helper scripts (kept locally, not shipped in the public repo)
 scripts/print_old_flowstate_secrets.py
 scripts/sonos_spike.py
+
+# Wrangler local cache (contains account id / email)
+.wrangler/

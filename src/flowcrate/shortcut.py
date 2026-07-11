@@ -11,6 +11,14 @@ class ShortcutError(RuntimeError):
     pass
 
 
+# Placeholder URL/token baked into the shipped *universal* signed shortcut. Users
+# on a non-macOS host download that pre-signed file and replace these two values
+# on-device. They must never be a real host/token (the file is public).
+UNIVERSAL_HOST_PLACEHOLDER = "YOUR-PI-HOSTNAME.local:8765"
+UNIVERSAL_URL = f"http://{UNIVERSAL_HOST_PLACEHOLDER}/api/play-latest"
+UNIVERSAL_TOKEN = "YOUR-API-TOKEN"
+
+
 def _text(value):
     return {"Value": {"string": value}, "WFSerializationType": "WFTextTokenString"}
 
@@ -126,6 +134,16 @@ def build_workflow(url, token):
             },
         ],
     }
+
+
+def unsigned_shortcut(url, token):
+    """Return the *unsigned* .shortcut plist bytes (no macOS signer required).
+
+    iOS/macOS can import this when "Allow Untrusted Shortcuts" is enabled. Lets a
+    non-macOS host (e.g. a Raspberry Pi) still hand out a ready-to-use, correctly
+    personalized shortcut without the macOS ``shortcuts`` CLI.
+    """
+    return plistlib.dumps(build_workflow(url, token))
 
 
 def signed_shortcut(url, token):
