@@ -16,7 +16,12 @@ class LogSummary:
 def list_logs():
     ensure_dirs()
     summaries = []
-    for path in list(LOGS_DIR.glob("*.json")) + list(LOGS_DIR.glob("*.csv")):
+    globbed = (
+        list(LOGS_DIR.glob("*.json"))
+        + list(LOGS_DIR.glob("*.csv"))
+        + list(LOGS_DIR.glob("*.log"))
+    )
+    for path in globbed:
         rows = _count_rows(path)
         summaries.append(LogSummary(path.name, rows, path.stat().st_mtime, path.suffix.lstrip(".").upper()))
     return sorted(summaries, key=lambda s: s.modified, reverse=True)
@@ -31,6 +36,10 @@ def read_log(filename, status_filter=""):
         if status_filter:
             rows = _filter_hierarchical_rows(rows, status_filter)
         return rows
+    if path.suffix in (".log", ".txt"):
+        # Plain-text server/launchd logs: one dict per line, newest last.
+        text = path.read_text(encoding="utf-8", errors="replace")
+        return [{"text": line} for line in text.splitlines()]
     with path.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     if status_filter:
@@ -41,6 +50,8 @@ def read_log(filename, status_filter=""):
 def _count_rows(path):
     if path.suffix == ".json":
         return len(_flatten(_read_json_rows(path)))
+    if path.suffix in (".log", ".txt"):
+        return sum(1 for _ in path.open(encoding="utf-8", errors="replace"))
     return max(sum(1 for _ in path.open(encoding="utf-8")) - 1, 0)
 
 

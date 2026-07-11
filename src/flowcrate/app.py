@@ -1,5 +1,6 @@
 import argparse
 import logging
+import logging.handlers
 import platform
 import socket
 import subprocess
@@ -32,7 +33,7 @@ from .cache import (
 )
 from .config import load_config, masked, reset_local_config, save_config
 from .logs import list_logs, read_log
-from .paths import CONFIG_FILE, LOGS_DIR, PROJECT_ROOT, TOKEN_CACHE, ensure_dirs
+from .paths import CONFIG_FILE, LOGS_DIR, TOKEN_CACHE, ensure_dirs
 from .playback import DevicePickerRequired, resolve_playback_target
 from .scraper import get_recent_posts, reset_session_cache, test_flowstate_fetch
 from .shortcut import ShortcutError, signed_shortcut
@@ -42,6 +43,31 @@ from .spotify import SpotifyManager, SpotifyRateLimitError
 # at once; only one refresh ever runs at a time.
 _REFRESH_LOCK = threading.Lock()
 _REFRESH_STATE = {"running": False}
+
+_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
+
+
+def _configure_file_logging():
+    """Attach a rotating file handler to the root logger writing server.log.
+
+    Werkzeug's request-line logger propagates to the root logger, so its lines
+    land in the file too. Idempotent: repeated calls (e.g. from tests that build
+    the app many times) do not stack duplicate handlers.
+    """
+    ensure_dirs()
+    root = logging.getLogger()
+    for handler in root.handlers:
+        if getattr(handler, "_flowcrate_file_handler", False):
+            return
+    handler = logging.handlers.RotatingFileHandler(
+        LOGS_DIR / "server.log", maxBytes=1_000_000, backupCount=3, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    handler._flowcrate_file_handler = True
+    root.addHandler(handler)
+    # Ensure records actually reach the handler even if basicConfig ran later.
+    if root.level > logging.INFO or root.level == logging.NOTSET:
+        root.setLevel(logging.INFO)
 
 
 def _start_background_refresh(limit=11):
@@ -73,6 +99,7 @@ def _refresh_status():
 
 def create_app():
     ensure_dirs()
+    _configure_file_logging()
     app = Flask(__name__)
     app.secret_key = "flowcrate-local-only"
 
@@ -233,7 +260,10 @@ def create_app():
         except Exception as exc:
             flash(str(exc), "error")
             return redirect(url_for("logs"))
-        return render_template("log_detail.html", filename=filename, rows=rows, status=status)
+        text_log = filename.lower().endswith((".log", ".txt"))
+        return render_template(
+            "log_detail.html", filename=filename, rows=rows, status=status, text_log=text_log
+        )
 
     @app.route("/status")
     def status():
@@ -437,7 +467,6 @@ def _render_dashboard(device_picker=None):
 def _status_checks():
     cfg = load_config()
     checks = [
-        ("Project folder", str(PROJECT_ROOT), PROJECT_ROOT.exists()),
         ("Config file", str(CONFIG_FILE), CONFIG_FILE.exists()),
         ("Logs folder", str(LOGS_DIR), LOGS_DIR.exists()),
         ("Spotify Client ID", masked(cfg.spotify_client_id), bool(cfg.spotify_client_id)),
@@ -481,9 +510,32 @@ def main(argv=None):
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
+    service_group = parser.add_mutually_exclusive_group()
+    service_group.add_argument(
+        "--install-service",
+        action="store_true",
+        help="Install and load a macOS launchd agent so Flow Crate runs at login.",
+    )
+    service_group.add_argument(
+        "--uninstall-service",
+        action="store_true",
+        help="Unload and remove the macOS launchd agent.",
+    )
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
+
+    if args.install_service:
+        from . import service
+
+        service.install_service(url=f"http://{_local_hostname()}:{args.port}")
+        return
+    if args.uninstall_service:
+        from . import service
+
+        service.uninstall_service()
+        return
+
     app = create_app()
     url = f"http://{args.host}:{args.port}"
     print(f"Flow Crate is running at {url}")

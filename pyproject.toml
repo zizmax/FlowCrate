@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowcrate"
+dynamic = ["version"]
+description = "A personal companion app for the Flow State ambient-music newsletter: browse the latest posts and play the picks on Spotify (and optionally Sonos)."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "Flask",
+    "requests",
+    "beautifulsoup4",
+    "python-dotenv",
+    "browser_cookie3",
+    "spotipy",
+    "soco",
+]
+
+[project.scripts]
+flowcrate = "flowcrate.app:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "flowcrate.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+flowcrate = ["templates/*", "static/*"]

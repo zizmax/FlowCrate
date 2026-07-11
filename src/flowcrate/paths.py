@@ -8,15 +8,12 @@ CONFIG_FILE = LOCAL_STATE_DIR / "config.env"
 TOKEN_CACHE = LOCAL_STATE_DIR / "spotify_token.cache"
 LEGACY_CONFIG_FILE = LEGACY_LOCAL_STATE_DIR / "config.env"
 LEGACY_TOKEN_CACHE = LEGACY_LOCAL_STATE_DIR / "spotify_token.cache"
-LOGS_DIR = PROJECT_ROOT / "logs"
-DATA_DIR = PROJECT_ROOT / "data"
-PREVIEWS_DIR = DATA_DIR / "previews"
-SEEDS_DIR = DATA_DIR / "seeds"
+# Logs live under the state dir (not the package/repo) so a pipx-installed
+# copy never writes inside its own virtualenv.
+LOGS_DIR = LOCAL_STATE_DIR / "logs"
 FLOWCRATE_DB = LOCAL_STATE_DIR / "flowcrate.db"
 
 
 def ensure_dirs():
     LOCAL_STATE_DIR.mkdir(parents=True, exist_ok=True)
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    PREVIEWS_DIR.mkdir(parents=True, exist_ok=True)
-    SEEDS_DIR.mkdir(parents=True, exist_ok=True)

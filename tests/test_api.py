@@ -331,6 +331,13 @@ class SettingsPageTests(unittest.TestCase):
         # The docs/SIRI_SETUP.md reference must be gone.
         self.assertNotIn("SIRI_SETUP.md", html)
 
+    def test_settings_renders_spotify_onboarding(self):
+        html = self._get_settings().get_data(as_text=True)
+        self.assertIn("First time? Create your Spotify app (2 minutes)", html)
+        self.assertIn("developer.spotify.com/dashboard", html)
+        # The live redirect URI must be surfaced for the Spotify app setup.
+        self.assertIn("http://127.0.0.1:8888/callback", html)
+
 
 class ShortcutWorkflowTests(unittest.TestCase):
     def test_url_and_token_land_in_workflow(self):

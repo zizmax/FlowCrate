@@ -5,15 +5,21 @@
   <div class="split">
     <div>
       <h1>{{ filename }}</h1>
-      <p class="muted">{{ rows|length }} rows{% if status %}, filtered to {{ status }}{% endif %}</p>
+      <p class="muted">{{ rows|length }} {% if text_log %}lines{% else %}rows{% endif %}{% if status %}, filtered to {{ status }}{% endif %}</p>
     </div>
+    {% if not text_log %}
     <div class="button-row">
       <a class="button" href="{{ url_for('log_detail', filename=filename) }}">All</a>
       <a class="button" href="{{ url_for('log_detail', filename=filename, status='FOUND') }}">Found</a>
       <a class="button" href="{{ url_for('log_detail', filename=filename, status='MISMATCH_REJECTED') }}">Rejected</a>
       <a class="button" href="{{ url_for('log_detail', filename=filename, status='NOT_FOUND') }}">Missing</a>
     </div>
+    {% endif %}
   </div>
+  {% if text_log %}
+  <pre class="log-text">{% for row in rows %}{{ row.text }}
+{% endfor %}</pre>
+  {% else %}
   <div class="table-wrap">
     <table>
       <thead>
@@ -65,5 +71,6 @@
       </tbody>
     </table>
   </div>
+  {% endif %}
 </section>
 {% endblock %}

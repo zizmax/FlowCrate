@@ -10,6 +10,26 @@
       <h2>Spotify</h2>
       <p class="muted">Required for matching, playback, queue, and playlist actions.</p>
     </div>
+
+    <details class="advanced">
+      <summary>First time? Create your Spotify app (2 minutes)</summary>
+      <ol>
+        <li>Go to
+          <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer">developer.spotify.com/dashboard</a>
+          and log in with the Spotify account you actually listen with (Premium is required for playback).</li>
+        <li>Click <strong>Create app</strong>. Name and description can be anything
+          (e.g. "Flow Crate"). Set the <strong>Redirect URI</strong> to exactly
+          <code>{{ cfg.spotify_redirect_uri }}</code>, and check the
+          <strong>Web API</strong> box.</li>
+        <li>Open the app's <strong>Settings</strong>, then copy the
+          <strong>Client ID</strong> and <strong>Client Secret</strong> into the
+          fields below. Click <strong>Save Settings</strong>, then
+          <strong>Test Spotify</strong>.</li>
+      </ol>
+      <p class="muted">Spotify development-mode apps are limited to 5 users, so each
+        household or friend creates their own free app. This is normal.</p>
+    </details>
+
     <label>
       Spotify Client ID
       <input name="SPOTIFY_CLIENT_ID" type="text" value="{{ cfg.spotify_client_id }}">
@@ -93,7 +113,7 @@
         <p class="muted">The phone must be on the same Wi-Fi network as this computer.</p>
         <p>On your iPhone, open Shortcuts, create a new shortcut named exactly
           <strong>Play Flow Crate</strong> (the name is the Siri phrase), and add
-          these three actions:</p>
+          these four actions:</p>
         <ol>
           <li><strong>Get Contents of URL</strong>
             <ul>
