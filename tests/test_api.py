@@ -301,7 +301,11 @@ class SettingsPageTests(unittest.TestCase):
         app = create_app()
         app.config.update(TESTING=True)
         empty_cfg = AppConfig()
-        with patch("flowcrate.app.load_config", return_value=empty_cfg):
+        # Pin the OS so the Siri section renders deterministically regardless of the
+        # host running the tests (macOS shows the single signed-download button).
+        # The non-macOS branch is covered by SiriShortcutRouteTests.
+        with patch("flowcrate.app.load_config", return_value=empty_cfg), \
+             patch("flowcrate.app.platform.system", return_value="Darwin"):
             return app.test_client().get("/settings")
 
     def test_settings_renders_scan_button(self):
@@ -330,6 +334,17 @@ class SettingsPageTests(unittest.TestCase):
         self.assertIn("copy-token-btn", html)
         # The docs/SIRI_SETUP.md reference must be gone.
         self.assertNotIn("SIRI_SETUP.md", html)
+
+    def test_settings_non_macos_offers_both_shortcut_options(self):
+        from flowcrate.config import AppConfig
+        app = create_app()
+        app.config.update(TESTING=True)
+        with patch("flowcrate.app.load_config", return_value=AppConfig(api_token="tok")), \
+             patch("flowcrate.app.platform.system", return_value="Linux"):
+            html = app.test_client().get("/settings").get_data(as_text=True)
+        self.assertIn("Download universal shortcut", html)
+        self.assertIn("Download ready-to-use (unsigned)", html)
+        self.assertIn("/api/siri-shortcut/universal", html)
 
     def test_settings_renders_spotify_onboarding(self):
         html = self._get_settings().get_data(as_text=True)
