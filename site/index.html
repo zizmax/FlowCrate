@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Flow Crate — play the latest Flow State mix</title>
   <meta name="description" content="Flow Crate fetches the newest post from the Flow State newsletter and plays the picks on your Spotify — or straight to your Sonos speakers with Hey Siri." />
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b0d10'/%3E%3Crect x='4' y='14' width='24' height='14' rx='2' fill='none' stroke='%23e07a10' stroke-width='2'/%3E%3Cpath d='M8 14V10a8 8 0 0 1 16 0v4' fill='none' stroke='%23e07a10' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='12' y1='19' x2='12' y2='23' stroke='%23e07a10' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='16' y1='18' x2='16' y2='24' stroke='%23e07a10' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='20' y1='19' x2='20' y2='23' stroke='%23e07a10' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23fff2ee'/%3E%3Crect x='4' y='14' width='24' height='14' rx='2' fill='none' stroke='%23bd5842' stroke-width='2'/%3E%3Cpath d='M8 14V10a8 8 0 0 1 16 0v4' fill='none' stroke='%23bd5842' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='12' y1='19' x2='12' y2='23' stroke='%23bd5842' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='16' y1='18' x2='16' y2='24' stroke='%23bd5842' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='20' y1='19' x2='20' y2='23' stroke='%23bd5842' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E" />
   <style>
     *, *::before, *::after {
       box-sizing: border-box;
@@ -14,22 +14,28 @@
     }
 
     :root {
-      --bg: #0b0d10;
-      --bg-elevated: #13161c;
-      --bg-inset: #0d0f13;
-      --border: rgba(255, 255, 255, 0.08);
-      --border-subtle: rgba(255, 255, 255, 0.05);
-      --text: #e8eaf0;
-      --text-muted: #8892a4;
-      --text-faint: #555f72;
-      --accent: #e07a10;
-      --accent-dim: rgba(224, 122, 16, 0.15);
-      --accent-glow: rgba(224, 122, 16, 0.08);
+      --bg: #fff2ee;
+      --panel: #ffffff;
+      --panel-warm: #fffaf8;
+      --line: #e2cbc5;
+      --text: #363737;
+      --muted: #757575;
+      --accent: #bd5842;
+      --accent-dark: #8f3d2d;
+      --accent-soft: #f0e3e0;
+      --term-bg: #0d0f13;
+      --term-chrome: #13161c;
+      --term-border: rgba(255, 255, 255, 0.08);
+      --term-text: #e8eaf0;
+      --term-muted: #8892a4;
+      --term-faint: #555f72;
+      --term-accent: #bd5842;
       --green: #3fb950;
       --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      --sans: "SF Pro Display", -apple-system, system-ui, BlinkMacSystemFont, Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --brand-font: Nunito, "SF Pro Display", -apple-system, system-ui, BlinkMacSystemFont, Inter, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       --radius: 8px;
-      --radius-sm: 5px;
+      --radius-sm: 7px;
       --max-w: 800px;
     }
 
@@ -49,7 +55,7 @@
     }
 
     a {
-      color: var(--accent);
+      color: var(--accent-dark);
       text-decoration: none;
     }
 
@@ -66,64 +72,57 @@
       padding: 0 24px;
     }
 
-    /* ── Header ────────────────────────────────── */
+    /* ── Topbar ────────────────────────────────── */
     header {
-      border-bottom: 1px solid var(--border);
+      background: var(--panel-warm);
+      border-bottom: 1px solid var(--line);
       position: sticky;
       top: 0;
       z-index: 10;
-      background: rgba(11, 13, 16, 0.92);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
     }
 
     .header-inner {
-      max-width: var(--max-w);
-      margin: 0 auto;
-      padding: 0 24px;
-      height: 56px;
-      display: flex;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
       align-items: center;
-      justify-content: space-between;
+      gap: 14px;
+      padding: 14px 22px;
     }
 
-    .wordmark {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 1rem;
-      font-weight: 600;
-      color: var(--text);
+    .brand {
+      grid-column: 2;
+      font-family: var(--brand-font);
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--accent);
       text-decoration: none;
-      letter-spacing: -0.01em;
+      letter-spacing: 0;
     }
 
-    .wordmark:hover {
+    .brand:hover {
       text-decoration: none;
-      color: var(--text);
-    }
-
-    .wordmark-icon {
-      flex-shrink: 0;
       color: var(--accent);
     }
 
-    .github-link {
+    .header-nav {
+      grid-column: 3;
+      display: flex;
+      justify-content: flex-end;
+      gap: 14px;
+    }
+
+    .header-nav a {
       display: flex;
       align-items: center;
       gap: 7px;
-      font-size: 0.875rem;
-      color: var(--text-muted);
+      font-size: 0.9375rem;
+      color: var(--muted);
       text-decoration: none;
-      padding: 6px 12px;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      transition: color 0.15s, border-color 0.15s;
+      transition: color 0.15s;
     }
 
-    .github-link:hover {
+    .header-nav a:hover {
       color: var(--text);
-      border-color: rgba(255, 255, 255, 0.18);
       text-decoration: none;
     }
 
@@ -134,14 +133,14 @@
 
     /* ── Hero ──────────────────────────────────── */
     .hero {
-      padding: 80px 0 72px;
+      padding: 76px 0 64px;
       text-align: center;
     }
 
     .hero h1 {
       font-size: clamp(1.75rem, 5vw, 2.75rem);
       font-weight: 700;
-      letter-spacing: -0.03em;
+      letter-spacing: -0.02em;
       line-height: 1.15;
       color: var(--text);
       margin-bottom: 20px;
@@ -153,26 +152,27 @@
 
     .hero-sub {
       font-size: 1.0625rem;
-      color: var(--text-muted);
+      color: var(--muted);
       max-width: 560px;
       margin: 0 auto 40px;
       line-height: 1.7;
     }
 
-    /* ── Terminal install block ────────────────── */
+    /* ── Terminal blocks (deliberately dark) ───── */
     .terminal-install {
-      background: var(--bg-inset);
-      border: 1px solid var(--border);
+      background: var(--term-bg);
+      border: 1px solid var(--line);
       border-radius: var(--radius);
       overflow: hidden;
       max-width: 580px;
       margin: 0 auto 16px;
       text-align: left;
+      box-shadow: 0 2px 12px rgba(54, 55, 55, 0.08);
     }
 
     .terminal-header {
-      background: var(--bg-elevated);
-      border-bottom: 1px solid var(--border);
+      background: var(--term-chrome);
+      border-bottom: 1px solid var(--term-border);
       padding: 10px 14px;
       display: flex;
       align-items: center;
@@ -199,7 +199,7 @@
     .terminal-title {
       font-family: var(--mono);
       font-size: 0.75rem;
-      color: var(--text-faint);
+      color: var(--term-faint);
       flex: 1;
       text-align: center;
     }
@@ -207,9 +207,9 @@
     .copy-btn {
       font-family: var(--mono);
       font-size: 0.75rem;
-      color: var(--text-muted);
+      color: var(--term-muted);
       background: rgba(255, 255, 255, 0.06);
-      border: 1px solid var(--border);
+      border: 1px solid var(--term-border);
       border-radius: 4px;
       padding: 3px 10px;
       cursor: pointer;
@@ -219,7 +219,7 @@
     }
 
     .copy-btn:hover {
-      color: var(--text);
+      color: var(--term-text);
       background: rgba(255, 255, 255, 0.1);
       border-color: rgba(255, 255, 255, 0.18);
     }
@@ -243,35 +243,26 @@
     }
 
     .prompt {
-      color: var(--accent);
+      color: var(--term-accent);
       user-select: none;
       flex-shrink: 0;
     }
 
     .cmd-text {
-      color: var(--text);
+      color: var(--term-text);
       word-break: break-all;
     }
 
     .hero-note {
       font-size: 0.8125rem;
-      color: var(--text-faint);
+      color: var(--muted);
       text-align: center;
     }
 
-    /* ── How it works ──────────────────────────── */
-    .how {
-      padding: 64px 0;
-      border-top: 1px solid var(--border-subtle);
-    }
-
-    .section-label {
-      font-family: var(--mono);
-      font-size: 0.75rem;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--accent);
-      margin-bottom: 12px;
+    /* ── Sections ──────────────────────────────── */
+    .how, .demo, .features {
+      padding: 56px 0;
+      border-top: 1px solid var(--line);
     }
 
     .section-heading {
@@ -279,18 +270,19 @@
       font-weight: 700;
       letter-spacing: -0.02em;
       color: var(--text);
-      margin-bottom: 40px;
+      margin-bottom: 32px;
     }
 
+    /* ── How it works ──────────────────────────── */
     .steps {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
-      gap: 24px;
+      gap: 18px;
     }
 
     .step {
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
+      background: var(--panel);
+      border: 1px solid var(--line);
       border-radius: var(--radius);
       padding: 24px;
     }
@@ -298,6 +290,7 @@
     .step-num {
       font-family: var(--mono);
       font-size: 0.75rem;
+      font-weight: 700;
       color: var(--accent);
       margin-bottom: 12px;
       letter-spacing: 0.05em;
@@ -305,7 +298,7 @@
 
     .step h3 {
       font-size: 1rem;
-      font-weight: 600;
+      font-weight: 700;
       color: var(--text);
       margin-bottom: 8px;
       letter-spacing: -0.01em;
@@ -313,26 +306,32 @@
 
     .step p {
       font-size: 0.875rem;
-      color: var(--text-muted);
+      color: var(--muted);
       line-height: 1.65;
     }
 
-    /* ── Demo terminal ─────────────────────────── */
-    .demo {
-      padding: 64px 0;
-      border-top: 1px solid var(--border-subtle);
+    .step code, .feature-card code {
+      font-family: var(--mono);
+      font-size: 0.85em;
+      color: var(--accent-dark);
+      background: var(--accent-soft);
+      border-radius: 4px;
+      padding: 1px 5px;
+      overflow-wrap: anywhere;
     }
 
+    /* ── Demo terminal ─────────────────────────── */
     .terminal-demo {
-      background: var(--bg-inset);
-      border: 1px solid var(--border);
+      background: var(--term-bg);
+      border: 1px solid var(--line);
       border-radius: var(--radius);
       overflow: hidden;
+      box-shadow: 0 2px 12px rgba(54, 55, 55, 0.08);
     }
 
     .terminal-demo-header {
-      background: var(--bg-elevated);
-      border-bottom: 1px solid var(--border);
+      background: var(--term-chrome);
+      border-bottom: 1px solid var(--term-border);
       padding: 10px 14px;
       display: flex;
       align-items: center;
@@ -342,7 +341,7 @@
     .terminal-demo-title {
       font-family: var(--mono);
       font-size: 0.75rem;
-      color: var(--text-faint);
+      color: var(--term-faint);
     }
 
     .terminal-demo-body {
@@ -352,18 +351,13 @@
       line-height: 2;
     }
 
-    .demo-prompt { color: var(--accent); }
-    .demo-cmd    { color: var(--text); }
+    .demo-prompt { color: var(--term-accent); }
+    .demo-cmd    { color: var(--term-text); }
     .demo-ok     { color: var(--green); }
-    .demo-music  { color: var(--accent); }
-    .demo-muted  { color: var(--text-faint); }
+    .demo-music  { color: var(--term-accent); }
+    .demo-muted  { color: var(--term-faint); }
 
     /* ── Feature grid ──────────────────────────── */
-    .features {
-      padding: 64px 0;
-      border-top: 1px solid var(--border-subtle);
-    }
-
     .feature-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
@@ -371,8 +365,8 @@
     }
 
     .feature-card {
-      background: var(--bg-elevated);
-      border: 1px solid var(--border);
+      background: var(--panel);
+      border: 1px solid var(--line);
       border-radius: var(--radius);
       padding: 24px;
     }
@@ -380,9 +374,9 @@
     .feature-icon {
       width: 36px;
       height: 36px;
-      background: var(--accent-dim);
-      border: 1px solid rgba(224, 122, 16, 0.2);
-      border-radius: 8px;
+      background: var(--accent-soft);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -392,7 +386,7 @@
 
     .feature-card h3 {
       font-size: 0.9375rem;
-      font-weight: 600;
+      font-weight: 700;
       color: var(--text);
       margin-bottom: 6px;
       letter-spacing: -0.01em;
@@ -400,14 +394,15 @@
 
     .feature-card p {
       font-size: 0.875rem;
-      color: var(--text-muted);
+      color: var(--muted);
       line-height: 1.65;
     }
 
     /* ── Footer ────────────────────────────────── */
     footer {
-      border-top: 1px solid var(--border);
-      padding: 36px 0;
+      border-top: 1px solid var(--line);
+      background: var(--panel-warm);
+      padding: 32px 0;
       margin-top: auto;
     }
 
@@ -415,24 +410,17 @@
       max-width: var(--max-w);
       margin: 0 auto;
       padding: 0 24px;
+      text-align: center;
     }
 
     .footer-text {
       font-size: 0.8125rem;
-      color: var(--text-faint);
+      color: var(--muted);
       line-height: 1.7;
     }
 
-    .footer-text a {
-      color: var(--text-muted);
-    }
-
-    .footer-text a:hover {
-      color: var(--text);
-    }
-
     .footer-github {
-      margin-top: 16px;
+      margin-top: 12px;
     }
 
     /* ── Motion ────────────────────────────────── */
@@ -442,14 +430,30 @@
       }
 
       .step:hover, .feature-card:hover {
-        border-color: rgba(255, 255, 255, 0.14);
+        border-color: var(--accent);
       }
     }
 
     /* ── Responsive ────────────────────────────── */
+    @media (max-width: 700px) {
+      .header-inner {
+        grid-template-columns: 1fr;
+        gap: 10px;
+        justify-items: center;
+      }
+
+      .brand, .header-nav {
+        grid-column: 1;
+      }
+
+      .header-nav {
+        justify-content: center;
+      }
+    }
+
     @media (max-width: 640px) {
       .hero {
-        padding: 56px 0 56px;
+        padding: 48px 0 48px;
       }
 
       .steps {
@@ -470,10 +474,6 @@
         font-size: 0.8125rem;
         padding: 16px 16px 20px;
       }
-
-      .hero h1 {
-        letter-spacing: -0.02em;
-      }
     }
 
     @media (max-width: 420px) {
@@ -485,25 +485,18 @@
 </head>
 <body>
 
-<!-- ── Header ───────────────────────────────────── -->
+<!-- ── Topbar ───────────────────────────────────── -->
 <header>
   <div class="header-inner">
-    <a href="#" class="wordmark" aria-label="Flow Crate home">
-      <svg class="wordmark-icon" width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-        <rect x="1" y="9" width="20" height="12" rx="2" stroke="currentColor" stroke-width="1.5"/>
-        <path d="M5 9V7a6 6 0 0 1 12 0v2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="7.5" y1="13.5" x2="7.5" y2="16.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="11" y1="12.5" x2="11" y2="17.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-        <line x1="14.5" y1="13.5" x2="14.5" y2="16.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
-      </svg>
-      Flow Crate
-    </a>
-    <a href="https://github.com/zizmax/FlowCrate" class="github-link" target="_blank" rel="noopener noreferrer">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
-        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
-      </svg>
-      GitHub
-    </a>
+    <a href="#" class="brand" aria-label="Flow Crate home">Flow Crate</a>
+    <nav class="header-nav">
+      <a href="https://github.com/zizmax/FlowCrate" target="_blank" rel="noopener noreferrer">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+          <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+        </svg>
+        GitHub
+      </a>
+    </nav>
   </div>
 </header>
 
@@ -545,13 +538,12 @@
   <!-- How it works -->
   <section class="how" aria-labelledby="how-heading">
     <div class="container">
-      <p class="section-label">How it works</p>
-      <h2 class="section-heading" id="how-heading">Up and running in minutes.</h2>
+      <h2 class="section-heading" id="how-heading">How it works</h2>
       <div class="steps">
         <article class="step">
           <p class="step-num">01</p>
           <h3>Install &amp; run</h3>
-          <p>One command with <code style="font-family:var(--mono);font-size:0.8em;color:var(--text)">pipx</code>, then type <code style="font-family:var(--mono);font-size:0.8em;color:var(--text)">flowcrate</code>. The dashboard opens in your browser at <code style="font-family:var(--mono);font-size:0.8em;color:var(--text)">localhost:8765</code>.</p>
+          <p>One command with <code>pipx</code>, then type <code>flowcrate</code> — the dashboard opens in your browser. Flow Crate runs on your own computer by design: that's what lets it talk to the newsletter, Spotify, and Sonos directly, authenticated as you, with no middleman server.</p>
         </article>
         <article class="step">
           <p class="step-num">02</p>
@@ -561,7 +553,7 @@
         <article class="step">
           <p class="step-num">03</p>
           <h3>Press play</h3>
-          <p>The newest Flow State picks, matched on Spotify and ready to queue. Sonos and Siri support are optional — one click to set up.</p>
+          <p>The newest Flow State picks, matched on Spotify and ready to queue. For the full experience — Siri always answering, fresh posts when you wake up — keep it running: install it as a background service on a Mac with <code>flowcrate --install-service</code>, or run it on an always-on machine like a Raspberry Pi.</p>
         </article>
       </div>
     </div>
@@ -570,8 +562,7 @@
   <!-- Demo terminal -->
   <section class="demo" aria-labelledby="demo-heading">
     <div class="container">
-      <p class="section-label">In action</p>
-      <h2 class="section-heading" id="demo-heading">What a typical run looks like.</h2>
+      <h2 class="section-heading" id="demo-heading">In action</h2>
       <div class="terminal-demo" role="img" aria-label="Terminal output example showing Flow Crate running successfully">
         <div class="terminal-demo-header">
           <div class="traffic-lights" aria-hidden="true">
@@ -583,10 +574,10 @@
         </div>
         <div class="terminal-demo-body" aria-hidden="true">
           <div><span class="demo-prompt">$ </span><span class="demo-cmd">flowcrate</span></div>
-          <div><span class="demo-ok">✓</span> <span class="demo-cmd">Flow Crate running at </span><span style="color:var(--accent)">http://localhost:8765</span></div>
+          <div><span class="demo-ok">✓</span> <span class="demo-cmd">Flow Crate running at </span><span style="color:var(--term-accent)">http://localhost:8765</span></div>
           <div><span class="demo-ok">✓</span> <span class="demo-cmd">Latest post fetched — 23 tracks matched</span></div>
           <div><span class="demo-ok">✓</span> <span class="demo-cmd">Spotify credentials loaded from </span><span class="demo-muted">~/.flowcrate/config.env</span></div>
-          <div><span class="demo-music">♫</span>  <span class="demo-cmd">Queued on Sonos: <span style="color:var(--text-muted)">Bedroom</span></span></div>
+          <div><span class="demo-music">♫</span>  <span class="demo-cmd">Queued on Sonos: <span style="color:var(--term-muted)">Bedroom</span></span></div>
           <div><span class="demo-muted">  Press Ctrl+C to stop.</span></div>
         </div>
       </div>
@@ -596,8 +587,7 @@
   <!-- Feature grid -->
   <section class="features" aria-labelledby="features-heading">
     <div class="container">
-      <p class="section-label">Features</p>
-      <h2 class="section-heading" id="features-heading">Built to stay out of your way.</h2>
+      <h2 class="section-heading" id="features-heading">Features</h2>
       <div class="feature-grid">
 
         <article class="feature-card">
@@ -608,7 +598,7 @@
             </svg>
           </div>
           <h3>Local-first</h3>
-          <p>No accounts, no cloud, no telemetry. Your Spotify credentials live in <code style="font-family:var(--mono);font-size:0.8em">~/.flowcrate</code> on your machine — nowhere else.</p>
+          <p>No accounts, no cloud, no telemetry. Your Spotify credentials live in <code>~/.flowcrate</code> on your machine — nowhere else.</p>
         </article>
 
         <article class="feature-card">
@@ -623,7 +613,7 @@
             </svg>
           </div>
           <h3>Sonos, direct</h3>
-          <p>Speaks to your speakers over your local network using SoCo — no cloud round-trip, no Sonos account required beyond your existing setup.</p>
+          <p>Speaks to your speakers over your local network using <a href="https://github.com/SoCo/SoCo" target="_blank" rel="noopener noreferrer">SoCo</a> — no cloud round-trip, no Sonos account required beyond your existing setup.</p>
         </article>
 
         <article class="feature-card">
@@ -658,7 +648,7 @@
 <footer>
   <div class="footer-inner">
     <p class="footer-text">Flow Crate is an unofficial personal project, unaffiliated with Flow State, Spotify, Sonos, or Apple. It never redistributes newsletter content — subscribe at <a href="https://flowstate.fm" target="_blank" rel="noopener noreferrer">flowstate.fm</a> and support the artists.</p>
-    <p class="footer-text footer-github" style="margin-top:12px">
+    <p class="footer-text footer-github">
       <a href="https://github.com/zizmax/FlowCrate" target="_blank" rel="noopener noreferrer">View source on GitHub</a>
     </p>
   </div>
