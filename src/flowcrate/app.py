@@ -281,16 +281,25 @@ def create_app():
             logging.exception("api/flowstate-access failed")
             return jsonify({"status": "none", "message": f"No access — unexpected error: {exc}"})
 
-    @app.route("/api/session", methods=["POST"])
+    @app.route("/api/session", methods=["GET", "POST"])
     def api_session():
-        """Receive Flow State session cookies synced from another device.
+        """Receive (POST) or report (GET) Flow State session cookies.
 
         Lets a headless install (e.g. a Raspberry Pi with no browser to read
         cookies from) get an authenticated session: you run a small command on the
-        machine where you're logged in, and it POSTs the cookies here. Authorized
-        with the same API token as ``/api/play-latest``.
+        machine where you're logged in, and it POSTs the cookies here (authorized
+        with the same API token as ``/api/play-latest``). GET lets the open
+        Settings page poll for a session that was just synced from another device.
         """
         cfg = load_config()
+        if request.method == "GET":
+            return jsonify(
+                {
+                    "has_session": bool(cfg.flowstate_connect_sid or cfg.substack_sid),
+                    "connect_sid": cfg.flowstate_connect_sid,
+                    "substack_sid": cfg.substack_sid,
+                }
+            )
         if not cfg.api_token:
             return jsonify({"ok": False, "error": "Set an API token in Settings first."}), 400
         if request.headers.get("X-FlowCrate-Token") != cfg.api_token:
@@ -603,6 +612,23 @@ def _local_port():
     return request.host.rsplit(":", 1)[1] if ":" in request.host else "80"
 
 
+def _local_ip():
+    """Best-effort primary LAN IPv4 address (the one used for outbound traffic).
+
+    Uses a UDP socket to a public address to discover which interface/IP the OS
+    would route through; no packets are actually sent. Returns None on failure.
+    """
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+        finally:
+            s.close()
+    except Exception:
+        return None
+
+
 def _reset_local_state():
     """Delete local config and Spotify auth token after an interactive confirmation."""
     print("This will delete the following local files (logs and previews are kept):")
@@ -643,13 +669,18 @@ def _hyperlink(url, label=None):
     return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
 
 
-def _print_startup_banner(url):
-    # Styled like a link (underlined cyan) and made clickable where supported.
-    link = _hyperlink(url, _style(url, "4", "36"))
+def _linkify(url):
+    """Styled (underlined cyan) clickable link where the terminal supports it."""
+    return _hyperlink(url, _style(url, "4", "36"))
+
+
+def _print_startup_banner(url, extra_urls=()):
     ctrl_c = _style("Ctrl+C", "1", "33")
     install = _style("flowcrate --install-service", "1", "32")
     uninstall = _style("flowcrate --uninstall-service", "1", "32")
-    print(f"{_style('Flow Crate', '1')} {__version__} — {link}")
+    print(f"{_style('Flow Crate', '1')} {__version__} — {_linkify(url)}")
+    for extra in extra_urls:
+        print(f"     also reachable at {_linkify(extra)}")
     print(f"Running in the foreground; press {ctrl_c} to stop.")
     print(f"Tip: run it permanently in the background with {install}")
     print(f"     (it starts at login and restarts itself; remove with {uninstall}).")
@@ -705,11 +736,24 @@ def main(argv=None):
         return
 
     app = create_app()
-    display_host = "localhost" if args.host == "0.0.0.0" else args.host
-    url = f"http://{display_host}:{args.port}"
-    _print_startup_banner(url)
+    if args.host == "0.0.0.0":
+        # Bound to all interfaces: lead with the network address (so a headless
+        # host prints a URL other devices can actually use), then the IP and
+        # localhost as fallbacks.
+        primary = f"http://{_local_hostname()}:{args.port}"
+        extras = []
+        ip = _local_ip()
+        if ip:
+            extras.append(f"http://{ip}:{args.port}")
+        extras.append(f"http://localhost:{args.port}")
+        open_url = f"http://localhost:{args.port}"
+    else:
+        primary = f"http://{args.host}:{args.port}"
+        extras = []
+        open_url = primary
+    _print_startup_banner(primary, extras)
     if not args.no_browser:
-        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+        threading.Timer(0.8, lambda: webbrowser.open(open_url)).start()
     # Never enable Flask debug mode: the Werkzeug debugger allows code execution
     # and the server binds to the LAN. --verbose only raises log verbosity.
     app.run(host=args.host, port=args.port, debug=False, use_reloader=False)

@@ -34,8 +34,12 @@
     </label>
     <label>
       Spotify Client Secret
-      <input name="SPOTIFY_CLIENT_SECRET" type="password" value="{{ cfg.spotify_client_secret }}">
+      <input id="spotify-secret-input" name="SPOTIFY_CLIENT_SECRET" type="password" value="{{ cfg.spotify_client_secret }}">
     </label>
+    <div class="button-row">
+      <button id="toggle-secret-btn" type="button">Show</button>
+      <button id="copy-secret-btn" type="button">Copy</button>
+    </div>
     <label>
       Spotify Redirect URI
       <input name="SPOTIFY_REDIRECT_URI" type="text" value="{{ cfg.spotify_redirect_uri }}">
@@ -60,8 +64,13 @@
 
     <label>
       Flow State session cookie (<code>connect.sid</code>)
-      <input name="FLOWSTATE_CONNECT_SID" type="password" value="{{ cfg.flowstate_connect_sid }}">
+      <input id="flowstate-sid-input" name="FLOWSTATE_CONNECT_SID" type="password" value="{{ cfg.flowstate_connect_sid }}">
     </label>
+    <div class="button-row">
+      <button id="toggle-sid-btn" type="button">Show</button>
+      <button id="copy-sid-btn" type="button">Copy</button>
+      <span id="sid-sync-msg" class="inline-result success" hidden></span>
+    </div>
 
     <details class="advanced">
       <summary>Paste the cookie by hand (if you can't use the command below)</summary>
@@ -72,12 +81,9 @@
         <li>Select the <code>www.flowstate.fm</code> site, find the cookie named <code>connect.sid</code>, and copy its value into the field above, then Save Settings.</li>
       </ol>
     </details>
-    <div class="button-row">
-      <button class="primary" name="action" value="save" type="submit">Save Settings</button>
-    </div>
 
     <details class="advanced">
-      <summary>Headless setup (Raspberry Pi / no browser on this machine)</summary>
+      <summary>Headless setup (No browser on the Flow Crate host)</summary>
       <p class="muted">When Flow Crate runs somewhere without your logged-in browser
         (like a Pi), it can't read your session automatically. Run this one-liner on
         the Mac/PC where you <em>are</em> logged in to Flow State — it reads your
@@ -85,7 +91,7 @@
         <a href="https://docs.astral.sh/uv/" target="_blank" rel="noreferrer">uv</a>
         (install with <code>curl -LsSf https://astral.sh/uv/install.sh | sh</code>).</p>
       {% if cfg.api_token %}
-        <pre class="sync-cmd"><code id="sync-cmd">uv run --with browser-cookie3 --with requests python -c "import browser_cookie3 as b,requests as r;f=b.firefox;c={x.name:x.value for x in list(f(domain_name='flowstate.fm'))+list(f(domain_name='substack.com'))};print(r.post('http://{{ local_hostname }}:{{ local_port }}/api/session',headers={'X-FlowCrate-Token':'{{ cfg.api_token }}'},json={'connect_sid':c.get('connect.sid',''),'substack_sid':c.get('substack.sid','')}).text)"</code></pre>
+        <pre class="sync-cmd"><code id="sync-cmd">uv run --with browser-cookie3 --with requests python -c "import browser_cookie3 as b,requests as r;f=b.firefox;c={x.name:x.value for x in list(f(domain_name='flowstate.fm'))+list(f(domain_name='substack.com'))};resp=r.post('http://{{ local_hostname }}:{{ local_port }}/api/session',headers={'X-FlowCrate-Token':'{{ cfg.api_token }}'},json={'connect_sid':c.get('connect.sid',''),'substack_sid':c.get('substack.sid','')});print('Session synced - the Flow Crate Settings page updates automatically (refresh if it does not).' if resp.ok else 'Sync failed: '+resp.text)"</code></pre>
         <div class="button-row">
           <button id="copy-sync-btn" type="button">Copy command</button>
           <span class="muted">Reads <strong>Firefox</strong> by default — swap
@@ -97,6 +103,10 @@
           Siri section below) first — the command will appear here once a token exists.</p>
       {% endif %}
     </details>
+
+    <div class="button-row">
+      <button class="primary" name="action" value="save" type="submit">Save Settings</button>
+    </div>
 
     <div class="section-heading">
       <h2>Sonos &amp; Siri (optional)</h2>
@@ -119,6 +129,7 @@
     </div>
     <label>
       API Token
+      <span class="muted">Enter anything you want or generate a secure random token.</span>
       <input id="api-token-input" name="API_TOKEN" type="password" value="{{ cfg.api_token }}">
     </label>
     <div class="button-row">
@@ -143,9 +154,11 @@
           so it already has this install's address and token built in — nothing to edit.
         </p>
       {% else %}
-        <p class="muted">This machine can't sign a shortcut (that needs macOS), so pick
-          one of these. Open this page in Safari on your iPhone first
-          (<code>http://{{ local_hostname }}:{{ local_port }}/settings</code>).</p>
+        <p class="muted">The machine hosting Flow Crate can't sign a Shortcut (requires
+          macOS). Open this page in Safari on your iPhone
+          (<code>http://{{ local_hostname }}:{{ local_port }}/settings</code>) then choose
+          one of the following download options or set up the Shortcut manually.
+          (To sign the Shortcut yourself, host Flow Crate on a Mac.)</p>
 
         <div class="shortcut-option">
           <p>
@@ -288,40 +301,42 @@
       tokenInput.value = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
     });
 
-    // --- Show / Hide token ---
-    const toggleBtn = document.getElementById("toggle-token-btn");
-    toggleBtn.addEventListener("click", () => {
-      if (tokenInput.type === "password") {
-        tokenInput.type = "text";
-        toggleBtn.textContent = "Hide";
-      } else {
-        tokenInput.type = "password";
-        toggleBtn.textContent = "Show";
-      }
-    });
-
-    // --- Copy token ---
-    const copyBtn = document.getElementById("copy-token-btn");
-    const flashCopied = () => {
-      copyBtn.textContent = "Copied!";
-      setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+    // --- Reusable Show/Hide + Copy for secret fields ---
+    const wireShowHide = (inputId, btnId) => {
+      const input = document.getElementById(inputId);
+      const btn = document.getElementById(btnId);
+      if (!input || !btn) return;
+      btn.addEventListener("click", () => {
+        if (input.type === "password") { input.type = "text"; btn.textContent = "Hide"; }
+        else { input.type = "password"; btn.textContent = "Show"; }
+      });
     };
-    copyBtn.addEventListener("click", () => {
-      const value = tokenInput.value;
-      if (navigator.clipboard?.writeText) {
-        navigator.clipboard.writeText(value).then(flashCopied).catch(() => {});
-        return;
-      }
-      // Fallback for non-secure origins (plain http on the LAN), where
-      // navigator.clipboard is undefined.
-      const wasMasked = tokenInput.type === "password";
-      if (wasMasked) tokenInput.type = "text";
-      tokenInput.select();
-      try {
-        if (document.execCommand("copy")) flashCopied();
-      } catch (_) {}
-      if (wasMasked) tokenInput.type = "password";
-    });
+    const wireCopy = (inputId, btnId) => {
+      const input = document.getElementById(inputId);
+      const btn = document.getElementById(btnId);
+      if (!input || !btn) return;
+      const label = btn.textContent;
+      const flash = () => { btn.textContent = "Copied!"; setTimeout(() => { btn.textContent = label; }, 1500); };
+      btn.addEventListener("click", () => {
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(input.value).then(flash).catch(() => {});
+          return;
+        }
+        // Fallback for non-secure origins (plain http on the LAN), where
+        // navigator.clipboard is undefined.
+        const wasMasked = input.type === "password";
+        if (wasMasked) input.type = "text";
+        input.select();
+        try { if (document.execCommand("copy")) flash(); } catch (_) {}
+        if (wasMasked) input.type = "password";
+      });
+    };
+    wireShowHide("api-token-input", "toggle-token-btn");
+    wireCopy("api-token-input", "copy-token-btn");
+    wireShowHide("spotify-secret-input", "toggle-secret-btn");
+    wireCopy("spotify-secret-input", "copy-secret-btn");
+    wireShowHide("flowstate-sid-input", "toggle-sid-btn");
+    wireCopy("flowstate-sid-input", "copy-sid-btn");
 
     // --- Copy headless sync command ---
     const syncCmd = document.getElementById("sync-cmd");
@@ -379,6 +394,35 @@
     accessBtn.addEventListener("click", runAccessCheck);
     // Run automatically on page load.
     runAccessCheck();
+
+    // --- Auto-detect a session synced from another device (headless flow) ---
+    // The uv command POSTs cookies straight to this server from another machine,
+    // so this open page never sees a form submit. Poll for a change and reflect it
+    // live: fill the field (with the real value, so a later Save is correct) and
+    // re-run the access check.
+    const sidInput = document.getElementById("flowstate-sid-input");
+    const sidSyncMsg = document.getElementById("sid-sync-msg");
+    if (sidInput) {
+      let lastSid = sidInput.value;
+      setInterval(() => {
+        fetch("/api/session")
+          .then((r) => (r.ok ? r.json() : null))
+          .then((data) => {
+            if (!data) return;
+            const val = data.connect_sid || "";
+            if (val && val !== lastSid) {
+              lastSid = val;
+              sidInput.value = val;
+              if (sidSyncMsg) {
+                sidSyncMsg.textContent = "Session synced from another device ✓";
+                sidSyncMsg.hidden = false;
+              }
+              runAccessCheck();
+            }
+          })
+          .catch(() => {});
+      }, 4000);
+    }
   })();
 </script>
 {% endblock %}

@@ -223,6 +223,15 @@ class ApiSessionTests(unittest.TestCase):
         app.config.update(TESTING=True)
         return app.test_client()
 
+    def test_get_reports_session_state(self):
+        cfg = SimpleNamespace(api_token="x", flowstate_connect_sid="c9", substack_sid="")
+        with patch("flowcrate.app.load_config", return_value=cfg):
+            r = self._client().get("/api/session")
+        self.assertEqual(r.status_code, 200)
+        data = r.get_json()
+        self.assertTrue(data["has_session"])
+        self.assertEqual(data["connect_sid"], "c9")
+
     def test_400_when_no_api_token_configured(self):
         with patch("flowcrate.app.load_config", return_value=SimpleNamespace(api_token="")):
             r = self._client().post("/api/session", json={"connect_sid": "x"})
