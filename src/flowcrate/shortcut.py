@@ -15,10 +15,41 @@ def _text(value):
     return {"Value": {"string": value}, "WFSerializationType": "WFTextTokenString"}
 
 
+def _action_output(output_name, output_uuid):
+    """Reference another action's output in a non-text parameter (e.g. WFInput)."""
+    return {
+        "Value": {
+            "OutputName": output_name,
+            "OutputUUID": output_uuid,
+            "Type": "ActionOutput",
+        },
+        "WFSerializationType": "WFTextTokenAttachment",
+    }
+
+
+def _text_with_output(output_name, output_uuid):
+    """Reference another action's output inside a text parameter."""
+    return {
+        "Value": {
+            "attachmentsByRange": {
+                "{0, 1}": {
+                    "Aggrandizements": [],
+                    "OutputName": output_name,
+                    "OutputUUID": output_uuid,
+                    "Type": "ActionOutput",
+                }
+            },
+            "string": "￼",  # object-replacement char the attachment replaces
+        },
+        "WFSerializationType": "WFTextTokenString",
+    }
+
+
 def build_workflow(url, token):
     # Actions don't chain implicitly in generated files: downstream parameters
     # must reference the upstream action's output by UUID (the "magic variable"
     # wiring the Shortcuts editor normally adds for you).
+    download_uuid = str(uuid.uuid4()).upper()
     dict_value_uuid = str(uuid.uuid4()).upper()
     return {
         "WFWorkflowMinimumClientVersion": 900,
@@ -30,12 +61,15 @@ def build_workflow(url, token):
         },
         "WFWorkflowImportQuestions": [],
         "WFWorkflowTypes": [],
+        "WFQuickActionSurfaces": [],
         "WFWorkflowInputContentItemClasses": [],
         "WFWorkflowHasOutputFallback": False,
+        "WFWorkflowHasShortcutInputVariables": False,
         "WFWorkflowActions": [
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
                 "WFWorkflowActionParameters": {
+                    "UUID": download_uuid,
                     "WFURL": url,
                     "WFHTTPMethod": "POST",
                     "WFHTTPHeaders": {
@@ -63,26 +97,31 @@ def build_workflow(url, token):
                     "WFGetDictionaryValueType": "Value",
                     "WFDictionaryKey": "speak",
                     "UUID": dict_value_uuid,
+                    "WFInput": _action_output("Contents of URL", download_uuid),
                 },
             },
-            # Show Result both speaks the text (when run via Siri) and shows
-            # it in the Siri notification.
+            # Speak Text always reads the summary aloud; Siri's own reading of
+            # Show Result only happens in hands-free contexts.
+            {
+                "WFWorkflowActionIdentifier": "is.workflow.actions.speaktext",
+                "WFWorkflowActionParameters": {
+                    "WFText": _text_with_output("Dictionary Value", dict_value_uuid),
+                },
+            },
+            # Show Result displays the text in the Siri card / an alert.
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.showresult",
                 "WFWorkflowActionParameters": {
-                    "Text": {
-                        "Value": {
-                            "attachmentsByRange": {
-                                "{0, 1}": {
-                                    "OutputName": "Dictionary Value",
-                                    "OutputUUID": dict_value_uuid,
-                                    "Type": "ActionOutput",
-                                }
-                            },
-                            "string": "\ufffc",  # object-replacement char the attachment replaces
-                        },
-                        "WFSerializationType": "WFTextTokenString",
-                    },
+                    "Text": _text_with_output("Dictionary Value", dict_value_uuid),
+                },
+            },
+            # Stop and Output makes the text retrievable from the command line
+            # (shortcuts run "Play Flow Crate" --output-path \u2026) for debugging.
+            {
+                "WFWorkflowActionIdentifier": "is.workflow.actions.output",
+                "WFWorkflowActionParameters": {
+                    "WFOutput": _text_with_output("Dictionary Value", dict_value_uuid),
+                    "WFNoOutputSurfaceBehavior": "Do Nothing",
                 },
             },
         ],
