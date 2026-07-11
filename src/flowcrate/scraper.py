@@ -199,14 +199,25 @@ def _browser_cookie_session():
 
 
 def _sid_session():
-    """Build a session authenticated with the configured SUBSTACK_SID, or None."""
+    """Build a session from manually-supplied/synced session cookies, or None.
+
+    Flow State is a Substack *custom domain*, so the cookie that actually unlocks
+    paid posts is ``connect.sid`` on ``www.flowstate.fm`` — ``substack.sid`` on
+    ``.substack.com`` alone does not authorize custom-domain fetches. We set the
+    flowstate ``connect.sid`` when available (the primary unlocker) and also the
+    ``substack.sid`` if present, for completeness.
+    """
     cfg = load_config()
+    connect_sid = cfg.flowstate_connect_sid or os.getenv("FLOWSTATE_CONNECT_SID")
     sid = cfg.substack_sid or os.getenv("SUBSTACK_SID")
-    if not sid:
+    if not connect_sid and not sid:
         return None
-    logging.info("Building Flow State session with SUBSTACK_SID fallback.")
+    logging.info("Building Flow State session from saved session cookies.")
     session = _plain_session()
-    session.cookies.set("substack.sid", sid, domain=".substack.com")
+    if connect_sid:
+        session.cookies.set("connect.sid", connect_sid, domain="www.flowstate.fm")
+    if sid:
+        session.cookies.set("substack.sid", sid, domain=".substack.com")
     return session
 
 

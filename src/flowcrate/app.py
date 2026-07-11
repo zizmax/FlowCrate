@@ -33,7 +33,7 @@ from .cache import (
     refresh_from_flowstate,
     selected_track_uris,
 )
-from .config import load_config, masked, reset_local_config, save_config
+from .config import load_config, masked, reset_local_config, save_config, save_config_values
 from .logs import list_logs, read_log
 from .paths import CONFIG_FILE, LOGS_DIR, TOKEN_CACHE, ensure_dirs
 from .playback import DevicePickerRequired, resolve_playback_target
@@ -271,6 +271,35 @@ def create_app():
             logging.exception("api/flowstate-access failed")
             return jsonify({"status": "none", "message": f"No access — unexpected error: {exc}"})
 
+    @app.route("/api/session", methods=["POST"])
+    def api_session():
+        """Receive Flow State session cookies synced from another device.
+
+        Lets a headless install (e.g. a Raspberry Pi with no browser to read
+        cookies from) get an authenticated session: you run a small command on the
+        machine where you're logged in, and it POSTs the cookies here. Authorized
+        with the same API token as ``/api/play-latest``.
+        """
+        cfg = load_config()
+        if not cfg.api_token:
+            return jsonify({"ok": False, "error": "Set an API token in Settings first."}), 400
+        if request.headers.get("X-FlowCrate-Token") != cfg.api_token:
+            return jsonify({"ok": False, "error": "Invalid or missing API token."}), 401
+        data = request.get_json(silent=True) or {}
+        connect_sid = (data.get("connect_sid") or "").strip()
+        substack_sid = (data.get("substack_sid") or "").strip()
+        if not connect_sid and not substack_sid:
+            return jsonify({"ok": False, "error": "No session cookies provided."}), 400
+        updates = {}
+        if connect_sid:
+            updates["FLOWSTATE_CONNECT_SID"] = connect_sid
+        if substack_sid:
+            updates["SUBSTACK_SID"] = substack_sid
+        save_config_values(updates)
+        reset_session_cache()
+        logging.info("Session cookies synced via /api/session: %s", ", ".join(sorted(updates)))
+        return jsonify({"ok": True, "message": "Session updated.", "received": sorted(updates)})
+
     @app.route("/setup")
     def setup():
         return redirect(url_for("settings"))
@@ -499,7 +528,13 @@ def _status_checks():
         ("Spotify Client ID", masked(cfg.spotify_client_id), bool(cfg.spotify_client_id)),
         ("Spotify Client Secret", masked(cfg.spotify_client_secret), bool(cfg.spotify_client_secret)),
         ("Spotify redirect URI", cfg.spotify_redirect_uri, bool(cfg.spotify_redirect_uri)),
-        ("Substack SID fallback", masked(cfg.substack_sid) if cfg.substack_sid else "Optional", True),
+        (
+            "Flow State session cookie",
+            masked(cfg.flowstate_connect_sid or cfg.substack_sid)
+            if (cfg.flowstate_connect_sid or cfg.substack_sid)
+            else "Optional",
+            True,
+        ),
         ("Spotify token cache", str(TOKEN_CACHE), TOKEN_CACHE.exists()),
     ]
     return checks

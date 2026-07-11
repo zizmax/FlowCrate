@@ -633,6 +633,31 @@ class LooksPaywalledTests(unittest.TestCase):
         self.assertFalse(self._check("<article>open content</article>"))
 
 
+class SidSessionTests(unittest.TestCase):
+    """_sid_session() builds a session from synced/manual Flow State cookies."""
+
+    def _cfg(self, connect="", substack=""):
+        from types import SimpleNamespace
+        return SimpleNamespace(flowstate_connect_sid=connect, substack_sid=substack)
+
+    def test_returns_none_without_any_cookie(self):
+        from flowcrate import scraper
+        with patch("flowcrate.scraper.load_config", return_value=self._cfg()), \
+             patch.dict("os.environ", {}, clear=False):
+            import os
+            os.environ.pop("FLOWSTATE_CONNECT_SID", None)
+            os.environ.pop("SUBSTACK_SID", None)
+            self.assertIsNone(scraper._sid_session())
+
+    def test_sets_connect_sid_on_flowstate_domain(self):
+        from flowcrate import scraper
+        with patch("flowcrate.scraper.load_config", return_value=self._cfg(connect="c1", substack="s1")):
+            session = scraper._sid_session()
+        jar = {(c.name, c.domain): c.value for c in session.cookies}
+        self.assertEqual(jar[("connect.sid", "www.flowstate.fm")], "c1")
+        self.assertEqual(jar[("substack.sid", ".substack.com")], "s1")
+
+
 class DefaultBrowserNameTests(unittest.TestCase):
     """Unit tests for the _default_browser_name() scraper helper."""
 

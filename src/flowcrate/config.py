@@ -11,6 +11,7 @@ KNOWN_KEYS = [
     "SPOTIFY_CLIENT_SECRET",
     "SPOTIFY_REDIRECT_URI",
     "SUBSTACK_SID",
+    "FLOWSTATE_CONNECT_SID",
     "SONOS_IP",
     "SONOS_ROOM",
     "API_TOKEN",
@@ -28,6 +29,7 @@ class AppConfig:
     spotify_client_secret: str = ""
     spotify_redirect_uri: str = "http://127.0.0.1:8888/callback"
     substack_sid: str = ""
+    flowstate_connect_sid: str = ""
     sonos_ip: str = ""
     sonos_room: str = ""
     api_token: str = ""
@@ -43,6 +45,7 @@ class AppConfig:
             "SPOTIFY_CLIENT_SECRET": self.spotify_client_secret,
             "SPOTIFY_REDIRECT_URI": self.spotify_redirect_uri,
             "SUBSTACK_SID": self.substack_sid,
+            "FLOWSTATE_CONNECT_SID": self.flowstate_connect_sid,
             "SONOS_IP": self.sonos_ip,
             "SONOS_ROOM": self.sonos_room,
             "API_TOKEN": self.api_token,
@@ -61,6 +64,7 @@ def load_config():
             or "http://127.0.0.1:8888/callback"
         ),
         substack_sid=os.getenv("SUBSTACK_SID", ""),
+        flowstate_connect_sid=os.getenv("FLOWSTATE_CONNECT_SID", ""),
         sonos_ip=os.getenv("SONOS_IP", ""),
         sonos_room=os.getenv("SONOS_ROOM", ""),
         api_token=os.getenv("API_TOKEN", ""),
@@ -85,6 +89,29 @@ def save_config(form_values):
     if not merged.get("SPOTIFY_REDIRECT_URI"):
         merged["SPOTIFY_REDIRECT_URI"] = "http://127.0.0.1:8888/callback"
 
+    lines = []
+    for key in KNOWN_KEYS:
+        val = merged.get(key, "")
+        escaped = val.replace("\\", "\\\\").replace('"', '\\"')
+        lines.append(f'{key}="{escaped}"')
+    CONFIG_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return load_config()
+
+
+def save_config_values(updates):
+    """Merge specific KNOWN_KEYS into the saved config, leaving the rest intact.
+
+    Unlike ``save_config`` (which rewrites every field from a full settings form
+    and blanks anything missing), this only touches the keys in ``updates`` — used
+    by endpoints that set one or two values (e.g. syncing session cookies).
+    """
+    ensure_dirs()
+    merged = read_saved_values()
+    for key, val in updates.items():
+        if key in KNOWN_KEYS:
+            merged[key] = (val or "").strip()
+    if not merged.get("SPOTIFY_REDIRECT_URI"):
+        merged["SPOTIFY_REDIRECT_URI"] = "http://127.0.0.1:8888/callback"
     lines = []
     for key in KNOWN_KEYS:
         val = merged.get(key, "")

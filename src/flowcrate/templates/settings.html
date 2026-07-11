@@ -50,7 +50,7 @@
 
     <div class="section-heading">
       <h2>Flow State</h2>
-      <p class="muted">Public Flow State posts work by default. For paid posts, Flow Crate automatically reuses your logged-in browser session when a post is paywalled. (Your computer may ask once for access to read those cookies.) If the automatic session detection fails, you need to paste your Substack SID cookie here as a manual fallback.</p>
+      <p class="muted">Public Flow State posts work by default. For paid posts, Flow Crate automatically reuses your logged-in browser session when a post is paywalled. (Your computer may ask once for access to read those cookies.) If automatic detection can't work — most often on a headless box like a Raspberry Pi with no browser — use the <strong>Headless setup</strong> command below to sync your session from another device. Pasting a cookie by hand is a last resort.</p>
     </div>
 
     <div class="button-row">
@@ -59,21 +59,44 @@
     </div>
 
     <label>
-      Substack SID
-      <input name="SUBSTACK_SID" type="password" value="{{ cfg.substack_sid }}">
+      Flow State session cookie (<code>connect.sid</code>)
+      <input name="FLOWSTATE_CONNECT_SID" type="password" value="{{ cfg.flowstate_connect_sid }}">
     </label>
 
     <details class="advanced">
-      <summary>How to find your Substack SID</summary>
+      <summary>Paste the cookie by hand (if you can't use the command below)</summary>
+      <p class="muted">Flow State is a Substack custom domain, so the cookie that unlocks paid posts is <code>connect.sid</code> on <code>www.flowstate.fm</code> — not <code>substack.sid</code>.</p>
       <ol>
         <li>In the browser where you're logged in to your Flow State subscription, open <a href="https://flowstate.fm" target="_blank" rel="noreferrer">flowstate.fm</a>.</li>
         <li>Open developer tools (Cmd+Option+I in Chrome/Firefox; in Safari enable the Develop menu first) and go to the storage/cookies view (Application → Cookies in Chrome).</li>
-        <li>Select the flowstate.fm site, find the cookie named <code>substack.sid</code>, and copy its value into the Substack SID field above, then Save Settings.</li>
+        <li>Select the <code>www.flowstate.fm</code> site, find the cookie named <code>connect.sid</code>, and copy its value into the field above, then Save Settings.</li>
       </ol>
     </details>
     <div class="button-row">
       <button class="primary" name="action" value="save" type="submit">Save Settings</button>
     </div>
+
+    <details class="advanced">
+      <summary>Headless setup (Raspberry Pi / no browser on this machine)</summary>
+      <p class="muted">When Flow Crate runs somewhere without your logged-in browser
+        (like a Pi), it can't read your session automatically. Run this one-liner on
+        the Mac/PC where you <em>are</em> logged in to Flow State — it reads your
+        session cookies locally and pushes them here. Requires
+        <a href="https://docs.astral.sh/uv/" target="_blank" rel="noreferrer">uv</a>
+        (install with <code>curl -LsSf https://astral.sh/uv/install.sh | sh</code>).</p>
+      {% if cfg.api_token %}
+        <pre class="sync-cmd"><code id="sync-cmd">uv run --with browser-cookie3 --with requests python -c "import browser_cookie3 as b,requests as r;f=b.firefox;c={x.name:x.value for x in list(f(domain_name='flowstate.fm'))+list(f(domain_name='substack.com'))};print(r.post('http://{{ local_hostname }}:{{ local_port }}/api/session',headers={'X-FlowCrate-Token':'{{ cfg.api_token }}'},json={'connect_sid':c.get('connect.sid',''),'substack_sid':c.get('substack.sid','')}).text)"</code></pre>
+        <div class="button-row">
+          <button id="copy-sync-btn" type="button">Copy command</button>
+          <span class="muted">Reads <strong>Firefox</strong> by default — swap
+            <code>b.firefox</code> for <code>b.chrome</code> or <code>b.safari</code>
+            if you're logged in elsewhere.</span>
+        </div>
+      {% else %}
+        <p class="muted">Set and save an <strong>API Token</strong> (in the Sonos &amp;
+          Siri section below) first — the command will appear here once a token exists.</p>
+      {% endif %}
+    </details>
 
     <div class="section-heading">
       <h2>Sonos &amp; Siri (optional)</h2>
@@ -261,6 +284,31 @@
       } catch (_) {}
       if (wasMasked) tokenInput.type = "password";
     });
+
+    // --- Copy headless sync command ---
+    const syncCmd = document.getElementById("sync-cmd");
+    const copySyncBtn = document.getElementById("copy-sync-btn");
+    if (syncCmd && copySyncBtn) {
+      copySyncBtn.addEventListener("click", () => {
+        const text = syncCmd.textContent;
+        const flash = () => {
+          copySyncBtn.textContent = "Copied!";
+          setTimeout(() => { copySyncBtn.textContent = "Copy command"; }, 1500);
+        };
+        if (navigator.clipboard?.writeText) {
+          navigator.clipboard.writeText(text).then(flash).catch(() => {});
+          return;
+        }
+        // Fallback for plain-http LAN origins where navigator.clipboard is undefined.
+        const range = document.createRange();
+        range.selectNodeContents(syncCmd);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        try { if (document.execCommand("copy")) flash(); } catch (_) {}
+        sel.removeAllRanges();
+      });
+    }
 
     // --- Flow State access check ---
     const accessResult = document.getElementById("flowstate-access-result");

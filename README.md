@@ -71,10 +71,12 @@ loginctl enable-linger "$USER"   # keep it running after you log out / on a head
 Set the Pi's hostname (e.g. `flowcrate.local` via avahi/mDNS) so the Siri
 shortcut URL stays stable across reboots and IP changes.
 
-On a **headless Pi** there's no browser for Flow Crate to borrow a Substack
-session from, so automatic paywall unlocking won't work — paste your
-`SUBSTACK_SID` on the Settings page (or set it in the environment) if you want
-paid posts to resolve.
+On a **headless Pi** there's no browser for Flow Crate to borrow a session from,
+so automatic paywall unlocking can't work there. Use the **Headless setup**
+command on the Settings page: it prints a one-liner you run on the Mac/PC where
+you're logged in to Flow State, which reads your session cookies locally and
+syncs them to the Pi (via the token-protected `/api/session` endpoint). Set an
+API token first so the command appears.
 
 One-tap Siri shortcut generation requires macOS. On Linux, use the in-app
 manual recipe in Settings, or download the shortcut once from a Mac — it keeps
