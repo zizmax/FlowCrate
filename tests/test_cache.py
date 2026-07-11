@@ -165,6 +165,23 @@ class CacheTests(unittest.TestCase):
         for entry, expected in cases:
             self.assertEqual(row_readiness(entry)["readiness_status"], expected)
 
+    def test_linked_readiness_label_is_ready_while_status_stays_linked(self):
+        result = row_readiness({"spotify_uri": "spotify:album:one", "match_status": "FOUND"})
+        self.assertEqual(result["readiness_status"], "Linked")
+        self.assertEqual(result["readiness_label"], "Ready")
+        self.assertEqual(result["readiness_key"], "status-ready")
+
+    def test_all_non_linked_statuses_have_matching_label(self):
+        cases = [
+            {"spotify_uri": "spotify:track:one", "match_status": "FOUND"},
+            {"match_status": "NEEDS_MATCH"},
+            {"match_status": "NOT_FOUND"},
+            {"match_status": "FAILED", "failure_reason": "Nope"},
+        ]
+        for entry in cases:
+            result = row_readiness(entry)
+            self.assertEqual(result["readiness_label"], result["readiness_status"])
+
     def test_selected_track_uris_expands_only_selected_linked_albums(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "flowcrate.db"

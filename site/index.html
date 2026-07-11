@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Flow Crate — play the latest Flow State mix</title>
   <meta name="description" content="Flow Crate fetches the newest post from the Flow State newsletter and plays the picks on your Spotify — or straight to your Sonos speakers with Hey Siri." />
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23fff2ee'/%3E%3Crect x='4' y='14' width='24' height='14' rx='2' fill='none' stroke='%23bd5842' stroke-width='2'/%3E%3Cpath d='M8 14V10a8 8 0 0 1 16 0v4' fill='none' stroke='%23bd5842' stroke-width='2' stroke-linecap='round'/%3E%3Cline x1='12' y1='19' x2='12' y2='23' stroke='%23bd5842' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='16' y1='18' x2='16' y2='24' stroke='%23bd5842' stroke-width='1.5' stroke-linecap='round'/%3E%3Cline x1='20' y1='19' x2='20' y2='23' stroke='%23bd5842' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@800&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23fff2ee'/%3E%3Cpolygon points='16,5 27,10.5 16,16 5,10.5' fill='%23d99a86'/%3E%3Cpolygon points='5,10.5 16,16 16,27 5,21.5' fill='%23bd5842'/%3E%3Cpolygon points='16,16 27,10.5 27,21.5 16,27' fill='%238f3d2d'/%3E%3Cline x1='5' y1='14.2' x2='16' y2='19.7' stroke='%23fff2ee' stroke-width='1' opacity='0.55'/%3E%3Cline x1='5' y1='17.9' x2='16' y2='23.4' stroke='%23fff2ee' stroke-width='1' opacity='0.55'/%3E%3Cline x1='16' y1='19.7' x2='27' y2='14.2' stroke='%23fff2ee' stroke-width='1' opacity='0.35'/%3E%3Cline x1='16' y1='23.4' x2='27' y2='17.9' stroke='%23fff2ee' stroke-width='1' opacity='0.35'/%3E%3C/svg%3E" />
   <style>
     *, *::before, *::after {
       box-sizing: border-box;
@@ -260,7 +263,7 @@
     }
 
     /* ── Sections ──────────────────────────────── */
-    .how, .demo, .features {
+    .how, .features {
       padding: 56px 0;
       border-top: 1px solid var(--line);
     }
@@ -274,10 +277,18 @@
     }
 
     /* ── How it works ──────────────────────────── */
+    /* Give this section a wider container than the rest of the page so the three
+       step cards get more horizontal room; at 800px they were narrow enough that
+       the text wrapped into tall, awkward columns. */
+    .how .container {
+      max-width: 1040px;
+    }
+
     .steps {
       display: grid;
       grid-template-columns: repeat(3, 1fr);
       gap: 18px;
+      align-items: stretch;
     }
 
     .step {
@@ -319,43 +330,6 @@
       padding: 1px 5px;
       overflow-wrap: anywhere;
     }
-
-    /* ── Demo terminal ─────────────────────────── */
-    .terminal-demo {
-      background: var(--term-bg);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      overflow: hidden;
-      box-shadow: 0 2px 12px rgba(54, 55, 55, 0.08);
-    }
-
-    .terminal-demo-header {
-      background: var(--term-chrome);
-      border-bottom: 1px solid var(--term-border);
-      padding: 10px 14px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .terminal-demo-title {
-      font-family: var(--mono);
-      font-size: 0.75rem;
-      color: var(--term-faint);
-    }
-
-    .terminal-demo-body {
-      padding: 24px 24px 28px;
-      font-family: var(--mono);
-      font-size: 0.875rem;
-      line-height: 2;
-    }
-
-    .demo-prompt { color: var(--term-accent); }
-    .demo-cmd    { color: var(--term-text); }
-    .demo-ok     { color: var(--green); }
-    .demo-music  { color: var(--term-accent); }
-    .demo-muted  { color: var(--term-faint); }
 
     /* ── Feature grid ──────────────────────────── */
     .feature-grid {
@@ -469,11 +443,6 @@
         font-size: 0.8125rem;
         padding: 14px 14px;
       }
-
-      .terminal-demo-body {
-        font-size: 0.8125rem;
-        padding: 16px 16px 20px;
-      }
     }
 
     @media (max-width: 420px) {
@@ -506,7 +475,7 @@
   <!-- Hero -->
   <section class="hero">
     <div class="container">
-      <h1>The latest Flow State mix,<br><span>one sentence away.</span></h1>
+      <h1>The latest Flow State mix, <span>instantly.</span></h1>
       <p class="hero-sub">Flow Crate fetches the newest post from the Flow State newsletter and plays the picks on your Spotify — or straight to your Sonos speakers with "Hey Siri, play Flow Crate."</p>
 
       <!-- Terminal install block -->
@@ -543,43 +512,18 @@
         <article class="step">
           <p class="step-num">01</p>
           <h3>Install &amp; run</h3>
-          <p>One command with <code>pipx</code>, then type <code>flowcrate</code> — the dashboard opens in your browser. Flow Crate runs on your own computer by design: that's what lets it talk to the newsletter, Spotify, and Sonos directly, authenticated as you, with no middleman server.</p>
+          <p>Launch the server and open the dashboard in your browser. Flow Crate intentionally runs on your own computer: enabling access to the newsletter, Spotify, and Sonos speakers on your local network directly, authenticated as you, with no middleman server.</p>
         </article>
         <article class="step">
           <p class="step-num">02</p>
           <h3>Connect Spotify</h3>
-          <p>Settings walks you through creating your own free Spotify developer app. Your keys never leave your machine — no backend, no middleman.</p>
+          <p>The Settings page walks you through creating your own free Spotify developer app to interact via API. Your keys never leave your machine.</p>
         </article>
         <article class="step">
           <p class="step-num">03</p>
           <h3>Press play</h3>
-          <p>The newest Flow State picks, matched on Spotify and ready to queue. For the full experience — Siri always answering, fresh posts when you wake up — keep it running: install it as a background service on a Mac with <code>flowcrate --install-service</code>, or run it on an always-on machine like a Raspberry Pi.</p>
+          <p>The newest Flow State picks are automatically detected and matched on Spotify for instant playback or queue. For the full experience, install it as a background service on an always-on machine.</p>
         </article>
-      </div>
-    </div>
-  </section>
-
-  <!-- Demo terminal -->
-  <section class="demo" aria-labelledby="demo-heading">
-    <div class="container">
-      <h2 class="section-heading" id="demo-heading">In action</h2>
-      <div class="terminal-demo" role="img" aria-label="Terminal output example showing Flow Crate running successfully">
-        <div class="terminal-demo-header">
-          <div class="traffic-lights" aria-hidden="true">
-            <div class="dot dot-red"></div>
-            <div class="dot dot-yellow"></div>
-            <div class="dot dot-green"></div>
-          </div>
-          <span class="terminal-demo-title">zsh — 80×24</span>
-        </div>
-        <div class="terminal-demo-body" aria-hidden="true">
-          <div><span class="demo-prompt">$ </span><span class="demo-cmd">flowcrate</span></div>
-          <div><span class="demo-ok">✓</span> <span class="demo-cmd">Flow Crate running at </span><span style="color:var(--term-accent)">http://localhost:8765</span></div>
-          <div><span class="demo-ok">✓</span> <span class="demo-cmd">Latest post fetched — 23 tracks matched</span></div>
-          <div><span class="demo-ok">✓</span> <span class="demo-cmd">Spotify credentials loaded from </span><span class="demo-muted">~/.flowcrate/config.env</span></div>
-          <div><span class="demo-music">♫</span>  <span class="demo-cmd">Queued on Sonos: <span style="color:var(--term-muted)">Bedroom</span></span></div>
-          <div><span class="demo-muted">  Press Ctrl+C to stop.</span></div>
-        </div>
       </div>
     </div>
   </section>

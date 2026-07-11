@@ -30,6 +30,18 @@ class AppTests(unittest.TestCase):
         self.assertIn("child-track-row", html)
         self.assertNotIn("artist-continuation", html)
         self.assertIn("Archive", html)
+        # Change 1: playable bubble replaces ready/linked
+        self.assertIn("playable", html)
+        self.assertNotIn("ready entries", html)
+        self.assertNotIn("linked albums", html)
+        # Change 2: action button tooltips
+        self.assertIn("replaces whatever is currently playing", html)
+        self.assertIn("end of your current Spotify queue", html)
+        self.assertIn("named after the post", html)
+        # Change 3: Refresh button is in cache-card, not bulk-actions
+        self.assertIn("refresh-in-card", html)
+        # Change 4: child-dash
+        self.assertIn("child-dash", html)
 
 
 class BackgroundRefreshLockTests(unittest.TestCase):
@@ -83,6 +95,7 @@ def _dashboard_payload():
                     "track_count": 9,
                     "match_status": "FOUND",
                     "readiness_status": "Ready",
+                    "readiness_label": "Ready",
                     "readiness_key": "status-ready",
                     "readiness_tooltip": "Track URI(s) are available for playback, queue, and playlist actions.",
                     "children": [
@@ -97,9 +110,10 @@ def _dashboard_payload():
                     ],
                 }
             ],
-            "summary": {"entry_count": 1, "linked_count": 0, "actionable_count": 1, "track_count": 9, "duration": "61m", "notes": "no vocals"},
+            "summary": {"entry_count": 1, "linked_count": 0, "actionable_count": 1, "playable_count": 1, "track_count": 9, "duration": "61m", "notes": "no vocals"},
             "playable_entry_count": 1,
             "linked_entry_count": 0,
+            "playable_count": 1,
             "track_count": 9,
         },
         "archive_posts": [
@@ -124,14 +138,16 @@ def _dashboard_payload():
                         "track_count": 8,
                         "match_status": "FOUND",
                         "readiness_status": "Ready",
+                        "readiness_label": "Ready",
                         "readiness_key": "status-ready",
                         "readiness_tooltip": "Track URI(s) are available for playback, queue, and playlist actions.",
                         "children": [],
                     }
                 ],
-                "summary": {"entry_count": 1, "linked_count": 0, "actionable_count": 1, "track_count": 8, "duration": "42m", "notes": ""},
+                "summary": {"entry_count": 1, "linked_count": 0, "actionable_count": 1, "playable_count": 1, "track_count": 8, "duration": "42m", "notes": ""},
                 "playable_entry_count": 1,
                 "linked_entry_count": 0,
+                "playable_count": 1,
                 "track_count": 8,
             }
         ],
@@ -152,6 +168,7 @@ def _dashboard_payload():
                 "track_count": 9,
                 "match_status": "FOUND",
                 "readiness_status": "Ready",
+                "readiness_label": "Ready",
                 "readiness_key": "status-ready",
                 "readiness_tooltip": "Track URI(s) are available for playback, queue, and playlist actions.",
                 "children": [],
@@ -174,6 +191,7 @@ def _dashboard_payload():
                 "track_count": 8,
                 "match_status": "FOUND",
                 "readiness_status": "Ready",
+                "readiness_label": "Ready",
                 "readiness_key": "status-ready",
                 "readiness_tooltip": "Track URI(s) are available for playback, queue, and playlist actions.",
                 "children": [],
@@ -188,8 +206,8 @@ def _dashboard_payload():
             "is_seeded": False,
         },
         "spotify_state": {"active": False, "message": ""},
-        "latest_summary": {"entry_count": 1, "linked_count": 0, "actionable_count": 1, "track_count": 9, "duration": "61m", "notes": "no vocals"},
-        "archive_summary": {"entry_count": 1, "linked_count": 0, "actionable_count": 1, "track_count": 8, "duration": "42m", "notes": ""},
+        "latest_summary": {"entry_count": 1, "linked_count": 0, "actionable_count": 1, "playable_count": 1, "track_count": 9, "duration": "61m", "notes": "no vocals"},
+        "archive_summary": {"entry_count": 1, "linked_count": 0, "actionable_count": 1, "playable_count": 1, "track_count": 8, "duration": "42m", "notes": ""},
     }
 
 

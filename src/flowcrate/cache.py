@@ -444,6 +444,7 @@ def summarize_entries(entries):
         "entry_count": len(ready),
         "linked_count": len(linked),
         "actionable_count": len(selected),
+        "playable_count": len(selected),
         "track_count": track_count,
         "duration": format_duration_ms(duration_ms) if duration_ms else _duration_from_entry_minutes(selected),
         "notes": ", ".join(notes[:4]),
@@ -465,6 +466,7 @@ def _post_group(post, entries):
     group["summary"] = summary
     group["playable_entry_count"] = summary["entry_count"]
     group["linked_entry_count"] = summary["linked_count"]
+    group["playable_count"] = summary["playable_count"]
     group["track_count"] = summary["track_count"]
     return group
 
@@ -521,6 +523,7 @@ def row_readiness(entry):
     if status == "FAILED":
         return {
             "readiness_status": "Failed",
+            "readiness_label": "Failed",
             "readiness_key": "status-failed",
             "readiness_tooltip": failure_reason or "Spotify matching or album expansion failed.",
             "selectable": False,
@@ -528,6 +531,7 @@ def row_readiness(entry):
     if status in {"NOT_FOUND", "MISMATCH_REJECTED"}:
         return {
             "readiness_status": "Not Found",
+            "readiness_label": "Not Found",
             "readiness_key": "status-not-found",
             "readiness_tooltip": failure_reason or "Spotify search ran and did not find an acceptable match.",
             "selectable": False,
@@ -535,6 +539,7 @@ def row_readiness(entry):
     if _is_track_uri(uri) or track_count > 0:
         return {
             "readiness_status": "Ready",
+            "readiness_label": "Ready",
             "readiness_key": "status-ready",
             "readiness_tooltip": "Track URI(s) are available for playback, queue, and playlist actions.",
             "selectable": True,
@@ -542,12 +547,14 @@ def row_readiness(entry):
     if _is_album_uri(uri):
         return {
             "readiness_status": "Linked",
-            "readiness_key": "status-linked",
-            "readiness_tooltip": "Flow State provided a Spotify album link. Flow Crate will expand it only when an action needs tracks.",
+            "readiness_label": "Ready",
+            "readiness_key": "status-ready",
+            "readiness_tooltip": "Album link from Flow State — Flow Crate loads the album's tracks when you press play.",
             "selectable": True,
         }
     return {
         "readiness_status": "Needs Match",
+        "readiness_label": "Needs Match",
         "readiness_key": "status-needs-match",
         "readiness_tooltip": "Flow State did not provide a Spotify URI. Spotify search is needed before this row can be used.",
         "selectable": False,

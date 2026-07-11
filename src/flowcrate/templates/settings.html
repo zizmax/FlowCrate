@@ -26,8 +26,6 @@
           fields below. Click <strong>Save Settings</strong>, then
           <strong>Test Spotify</strong>.</li>
       </ol>
-      <p class="muted">Spotify development-mode apps are limited to 5 users, so each
-        household or friend creates their own free app. This is normal.</p>
     </details>
 
     <label>
@@ -50,20 +48,32 @@
       {% endif %}
     </div>
 
+    <div class="section-heading">
+      <h2>Flow State</h2>
+      <p class="muted">Public Flow State posts work by default. For paid posts, Flow Crate automatically reuses your logged-in browser session when a post is paywalled. (Your computer may ask once for access to read those cookies.) If the automatic session detection fails, you need to paste your Substack SID cookie here as a manual fallback.</p>
+    </div>
+
+    <div class="button-row">
+      <span id="flowstate-access-result" class="inline-result"></span>
+      <button id="flowstate-access-btn" type="button">Re-check access</button>
+    </div>
+
+    <label>
+      Substack SID
+      <input name="SUBSTACK_SID" type="password" value="{{ cfg.substack_sid }}">
+    </label>
+
     <details class="advanced">
-      <summary>Substack fallback</summary>
-      <p class="muted">Substack SID is optional. Flow Crate reads Flow State over public access by default and never touches your browser cookies unless a post appears paywalled. Only if a fetch is blocked does it retry with browser cookies and then this SID.</p>
-      <label>
-        Substack SID
-        <input name="SUBSTACK_SID" type="password" value="{{ cfg.substack_sid }}">
-      </label>
-      <div class="button-row">
-        <button name="action" value="test_substack" type="submit">Test Flow State Fetch</button>
-        {% if test_results.substack %}
-          <span class="inline-result {{ test_results.substack.category }}">{{ test_results.substack.message }}</span>
-        {% endif %}
-      </div>
+      <summary>How to find your Substack SID</summary>
+      <ol>
+        <li>In the browser where you're logged in to your Flow State subscription, open <a href="https://flowstate.fm" target="_blank" rel="noreferrer">flowstate.fm</a>.</li>
+        <li>Open developer tools (Cmd+Option+I in Chrome/Firefox; in Safari enable the Develop menu first) and go to the storage/cookies view (Application → Cookies in Chrome).</li>
+        <li>Select the flowstate.fm site, find the cookie named <code>substack.sid</code>, and copy its value into the Substack SID field above, then Save Settings.</li>
+      </ol>
     </details>
+    <div class="button-row">
+      <button class="primary" name="action" value="save" type="submit">Save Settings</button>
+    </div>
 
     <div class="section-heading">
       <h2>Sonos &amp; Siri (optional)</h2>
@@ -131,18 +141,6 @@
           configured Sonos room and Siri reads the post title, date, and track count.</p>
       </details>
     </div>
-  </form>
-
-  <form action="{{ url_for('reset_settings') }}" method="post" class="danger-zone stack">
-    <div class="section-heading">
-      <h2>Start Fresh</h2>
-      <p class="muted">Clear local credentials and Spotify auth tokens. Logs and previews stay in place.</p>
-    </div>
-    <label>
-      Type RESET to confirm
-      <input name="confirmation" type="text" autocomplete="off">
-    </label>
-    <button class="danger" type="submit">Start Fresh</button>
   </form>
 
   <div class="status-block">
@@ -263,6 +261,38 @@
       } catch (_) {}
       if (wasMasked) tokenInput.type = "password";
     });
+
+    // --- Flow State access check ---
+    const accessResult = document.getElementById("flowstate-access-result");
+    const accessBtn = document.getElementById("flowstate-access-btn");
+
+    const statusClass = (status) => {
+      if (status === "full") return "success";
+      return "error";
+    };
+
+    const runAccessCheck = () => {
+      accessBtn.disabled = true;
+      accessResult.className = "inline-result";
+      accessResult.textContent = "Checking Flow State access…";
+      fetch("/api/flowstate-access")
+        .then((r) => r.json())
+        .then((data) => {
+          accessResult.className = "inline-result " + statusClass(data.status || "none");
+          accessResult.textContent = data.message || "";
+        })
+        .catch(() => {
+          accessResult.className = "inline-result error";
+          accessResult.textContent = "Check failed — could not reach the app";
+        })
+        .finally(() => {
+          accessBtn.disabled = false;
+        });
+    };
+
+    accessBtn.addEventListener("click", runAccessCheck);
+    // Run automatically on page load.
+    runAccessCheck();
   })();
 </script>
 {% endblock %}

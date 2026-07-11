@@ -43,9 +43,8 @@
                   {% if post.url %}<a href="{{ post.url }}" target="_blank" rel="noreferrer">Source</a>{% endif %}
                 </div>
                 <div class="post-group-meta">
-                  <span>{{ post.playable_entry_count }} ready</span>
-                  {% if post.linked_entry_count %}<span>{{ post.linked_entry_count }} linked</span>{% endif %}
-                  <span>{{ post.track_count }} tracks</span>
+                  <span>{{ post.playable_count }} playable</span>
+                  {% if post.track_count %}<span>{{ post.track_count }} tracks</span>{% endif %}
                   <span class="selected-count" data-selected-count="{{ post_scope }}">0 selected</span>
                 </div>
               </div>
@@ -54,7 +53,7 @@
           {% set post_loop = loop.index %}
           {% for entry in post.entries %}
             {% set child_key = (selection_scope or 'entries') ~ '-' ~ post_loop ~ '-' ~ loop.index %}
-            <tr>
+            <tr class="entry-row">
               <td class="check-cell">
                 <input
                   type="checkbox"
@@ -68,7 +67,7 @@
                 >
               </td>
               <td class="artist-cell">
-                <strong>{{ entry.parsed_artist }} - {{ entry.parsed_name }}</strong>
+                <span class="child-dash" aria-hidden="true">–</span><strong>{{ entry.parsed_artist }} - {{ entry.parsed_name }}</strong>
                 <div class="muted small">{{ entry.parsed_type }}</div>
               </td>
               <td>
@@ -88,7 +87,7 @@
                 {% endif %}
               </td>
               <td>
-                <span class="badge {{ entry.readiness_key }}" title="{{ entry.readiness_tooltip }}">{{ entry.readiness_status }}</span>
+                <span class="badge {{ entry.readiness_key }}" title="{{ entry.readiness_tooltip }}">{{ entry.readiness_label }}</span>
                 {% if entry.failure_reason %}<div class="muted small">{{ entry.failure_reason }}</div>{% endif %}
               </td>
             </tr>
@@ -96,7 +95,7 @@
               <tr class="child-track-row" data-child-of="{{ child_key }}" hidden>
                 <td class="check-cell"></td>
                 <td class="child-track-cell">
-                  <span class="track-number">{{ child.track_number or loop.index }}</span>
+                  <span class="child-dash" aria-hidden="true">–</span><span class="track-number">{{ child.track_number or loop.index }}</span>
                   <strong>{{ child.spotify_artist }} - {{ child.spotify_name }}</strong>
                   <div class="muted small">album track</div>
                 </td>
@@ -183,7 +182,7 @@
               {% endif %}
             </td>
             <td>
-              <span class="badge {{ entry.readiness_key }}" title="{{ entry.readiness_tooltip }}">{{ entry.readiness_status }}</span>
+              <span class="badge {{ entry.readiness_key }}" title="{{ entry.readiness_tooltip }}">{{ entry.readiness_label }}</span>
               {% if entry.failure_reason %}<div class="muted small">{{ entry.failure_reason }}</div>{% endif %}
             </td>
           </tr>
@@ -192,7 +191,7 @@
               <td class="check-cell"></td>
               {% if show_post %}<td></td>{% endif %}
               <td class="child-track-cell">
-                <span class="track-number">{{ child.track_number or loop.index }}</span>
+                <span class="child-dash" aria-hidden="true">–</span><span class="track-number">{{ child.track_number or loop.index }}</span>
                 <strong>{{ child.spotify_artist }} - {{ child.spotify_name }}</strong>
                 <div class="muted small">album track</div>
               </td>

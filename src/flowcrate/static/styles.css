@@ -65,6 +65,12 @@ nav a {
   text-decoration: none;
 }
 
+nav a.active {
+  border-bottom: 2px solid var(--accent);
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
 .page {
   margin: 0 auto;
   max-width: 1180px;
@@ -207,6 +213,7 @@ nav a {
 }
 
 .bulk-actions {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -229,7 +236,7 @@ nav a {
 }
 
 .post-group-row td {
-  background: #fffaf8;
+  background: var(--accent-soft);
   border-bottom-color: var(--accent-soft);
   border-top: 1px solid var(--line);
   padding-bottom: 11px;
@@ -266,6 +273,13 @@ nav a {
   color: var(--accent-dark);
   font-weight: 700;
   padding: 4px 8px;
+}
+
+/* In the toolbar, match the height/shape of the hero-stat pills beside it;
+   inside tables the smaller shared pill style above applies. */
+.bulk-actions .selected-count {
+  border: 1px solid var(--accent);
+  padding: 6px 10px;
 }
 
 .small {
@@ -430,6 +444,19 @@ button:disabled {
 
 .section-heading:first-child {
   border-top: 0;
+  padding-top: 0;
+}
+
+/* Change 4: generous visual separator between settings sections */
+.stack .section-heading {
+  border-top-width: 2px;
+  margin-top: 36px;
+  padding-top: 28px;
+}
+
+.stack .section-heading:first-of-type {
+  border-top: 0;
+  margin-top: 0;
   padding-top: 0;
 }
 
@@ -619,8 +646,23 @@ th {
   font-size: 13px;
 }
 
+.entry-row .artist-cell {
+  padding-left: 24px;
+}
+
 .child-track-cell {
-  padding-left: 28px;
+  padding-left: 48px;
+}
+
+.child-dash {
+  color: var(--muted);
+  margin-right: 4px;
+  user-select: none;
+}
+
+.refresh-in-card {
+  align-self: flex-start;
+  margin-top: 8px;
 }
 
 .track-number {

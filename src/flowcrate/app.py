@@ -1,9 +1,11 @@
 import argparse
 import logging
 import logging.handlers
+import os
 import platform
 import socket
 import subprocess
+import sys
 import threading
 import time
 import webbrowser
@@ -35,7 +37,14 @@ from .config import load_config, masked, reset_local_config, save_config
 from .logs import list_logs, read_log
 from .paths import CONFIG_FILE, LOGS_DIR, TOKEN_CACHE, ensure_dirs
 from .playback import DevicePickerRequired, resolve_playback_target
-from .scraper import get_recent_posts, reset_session_cache, test_flowstate_fetch
+from .scraper import (
+    browser_from_user_agent,
+    check_flowstate_access,
+    get_recent_posts,
+    reset_session_cache,
+    set_preferred_browser,
+    test_flowstate_fetch,
+)
 from .shortcut import ShortcutError, signed_shortcut
 from .spotify import SpotifyManager, SpotifyRateLimitError
 
@@ -102,6 +111,13 @@ def create_app():
     _configure_file_logging()
     app = Flask(__name__)
     app.secret_key = "flowcrate-local-only"
+
+    @app.before_request
+    def _detect_browser():
+        ua = request.headers.get("User-Agent", "")
+        name = browser_from_user_agent(ua)
+        if name:
+            set_preferred_browser(name)
 
     @app.template_filter("fmt_time")
     def fmt_time(value):
@@ -211,15 +227,6 @@ def create_app():
                     }
                 except Exception as exc:
                     test_results["spotify"] = {"category": "error", "message": f"Spotify test failed: {exc}"}
-            elif action == "test_substack":
-                try:
-                    proof = test_flowstate_fetch()
-                    test_results["substack"] = {
-                        "category": "success",
-                        "message": f"Flow State fetch succeeded: {proof['title']}.",
-                    }
-                except Exception as exc:
-                    test_results["substack"] = {"category": "error", "message": f"Substack test failed: {exc}"}
             else:
                 flash("Settings saved.", "success")
             cfg = load_config()
@@ -233,16 +240,36 @@ def create_app():
             local_port=_local_port(),
         )
 
-    @app.route("/settings/reset", methods=["POST"])
-    def reset_settings():
-        confirmation = request.form.get("confirmation", "").strip()
-        if confirmation != "RESET":
-            flash("Type RESET to start fresh.", "error")
-            return redirect(url_for("settings"))
-        removed = reset_local_config()
-        reset_session_cache()
-        flash(f"Started fresh. Removed {len(removed)} local config/auth file(s); logs and previews were kept.", "success")
-        return redirect(url_for("settings"))
+    @app.route("/api/test-substack", methods=["POST"])
+    def api_test_substack():
+        try:
+            proof = test_flowstate_fetch()
+            return jsonify(
+                {
+                    "ok": True,
+                    "category": "success",
+                    "message": f"Flow State fetch succeeded: {proof['title']}.",
+                }
+            )
+        except Exception as exc:
+            return jsonify(
+                {
+                    "ok": False,
+                    "category": "error",
+                    "message": f"Substack test failed: {exc}",
+                }
+            )
+
+    @app.route("/api/flowstate-access")
+    def api_flowstate_access():
+        try:
+            result = check_flowstate_access()
+            if result.get("scanned", 0) > 11:
+                _start_background_refresh(limit=result["scanned"])
+            return jsonify(result)
+        except Exception as exc:
+            logging.exception("api/flowstate-access failed")
+            return jsonify({"status": "none", "message": f"No access — unexpected error: {exc}"})
 
     @app.route("/setup")
     def setup():
@@ -505,11 +532,73 @@ def _local_port():
     return request.host.rsplit(":", 1)[1] if ":" in request.host else "80"
 
 
+def _reset_local_state():
+    """Delete local config and Spotify auth token after an interactive confirmation."""
+    print("This will delete the following local files (logs and previews are kept):")
+    print(f"  Config file:         {CONFIG_FILE}")
+    print(f"  Spotify token cache: {TOKEN_CACHE}")
+    if input("Type RESET to confirm: ").strip() != "RESET":
+        print("Reset cancelled.")
+        return
+    removed = reset_local_config()
+    print(f"Started fresh. Removed {len(removed)} local config/auth file(s).")
+
+
+def _ansi_enabled():
+    """True when it's safe to emit ANSI escapes to stdout.
+
+    Disabled when stdout is not a terminal (e.g. captured to a launchd log file),
+    when NO_COLOR is set, or for dumb terminals — so log files stay clean text.
+    """
+    return (
+        sys.stdout.isatty()
+        and os.environ.get("NO_COLOR") is None
+        and os.environ.get("TERM") != "dumb"
+    )
+
+
+def _style(text, *codes):
+    """Wrap text in the given SGR codes, or return it unchanged if ANSI is off."""
+    if not codes or not _ansi_enabled():
+        return text
+    return "\033[" + ";".join(codes) + "m" + text + "\033[0m"
+
+
+def _hyperlink(url, label=None):
+    """Render an OSC 8 clickable hyperlink, falling back to plain text."""
+    label = label or url
+    if not _ansi_enabled():
+        return label
+    return f"\033]8;;{url}\033\\{label}\033]8;;\033\\"
+
+
+def _print_startup_banner(url):
+    # Styled like a link (underlined cyan) and made clickable where supported.
+    link = _hyperlink(url, _style(url, "4", "36"))
+    ctrl_c = _style("Ctrl+C", "1", "33")
+    install = _style("flowcrate --install-service", "1", "32")
+    uninstall = _style("flowcrate --uninstall-service", "1", "32")
+    print(f"{_style('Flow Crate', '1')} {__version__} — {link}")
+    print(f"Running in the foreground; press {ctrl_c} to stop.")
+    print(f"Tip: run it permanently in the background with {install}")
+    print(f"     (it starts at login and restarts itself; remove with {uninstall}).")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Run the Flow Crate local web UI.")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Delete local config and Spotify auth token, then exit (asks for confirmation).",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show per-request and debug logs.",
+    )
     service_group = parser.add_mutually_exclusive_group()
     service_group.add_argument(
         "--install-service",
@@ -523,7 +612,15 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG, format=_LOG_FORMAT)
+    else:
+        logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT)
+        logging.getLogger("werkzeug").setLevel(logging.WARNING)
+
+    if args.reset:
+        _reset_local_state()
+        return
 
     if args.install_service:
         from . import service
@@ -537,10 +634,13 @@ def main(argv=None):
         return
 
     app = create_app()
-    url = f"http://{args.host}:{args.port}"
-    print(f"Flow Crate is running at {url}")
+    display_host = "localhost" if args.host == "0.0.0.0" else args.host
+    url = f"http://{display_host}:{args.port}"
+    _print_startup_banner(url)
     if not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+    # Never enable Flask debug mode: the Werkzeug debugger allows code execution
+    # and the server binds to the LAN. --verbose only raises log verbosity.
     app.run(host=args.host, port=args.port, debug=False, use_reloader=False)
 
 

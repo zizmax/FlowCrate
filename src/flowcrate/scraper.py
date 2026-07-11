@@ -1,9 +1,12 @@
 import json
 import logging
 import os
+import plistlib
 import re
 import xml.etree.ElementTree as ET
 from email.utils import parsedate_to_datetime
+from functools import lru_cache
+from pathlib import Path
 from urllib.parse import urljoin
 
 import requests
@@ -18,6 +21,34 @@ except Exception:  # pragma: no cover - import availability is environment-speci
 from .config import load_config
 
 _session_cache = None
+_preferred_browser = None
+
+
+def set_preferred_browser(name):
+    """Set a module-level preferred-browser hint (call from request context)."""
+    global _preferred_browser
+    _preferred_browser = name
+
+
+def browser_from_user_agent(ua):
+    """Map a browser User-Agent string to a cookie-loader name.
+
+    Order matters: Edge must be checked before Chrome because Edge UAs contain
+    both "Edg/" and "Chrome/". Brave is indistinguishable from Chrome in UA.
+
+    Returns one of "Edge", "Firefox", "Chrome", "Safari", or None.
+    """
+    if not ua:
+        return None
+    if "Edg/" in ua:
+        return "Edge"
+    if "Firefox/" in ua:
+        return "Firefox"
+    if "Chrome/" in ua:
+        return "Chrome"
+    if "Safari/" in ua:
+        return "Safari"
+    return None
 
 
 def get_session():
@@ -42,16 +73,80 @@ def _plain_session():
     return session
 
 
+@lru_cache(maxsize=1)
+def _default_browser_name():
+    """Detect the macOS default browser from the LaunchServices plist.
+
+    Returns a browser name matching the loader names used in
+    ``_browser_cookie_session()`` (Chrome, Firefox, Safari, Brave, Edge,
+    Chromium), or None if detection fails or is unsupported.
+    """
+    try:
+        plist_path = (
+            Path.home()
+            / "Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist"
+        )
+        with open(plist_path, "rb") as fh:
+            data = plistlib.load(fh)
+        bundle_id = None
+        for handler in data.get("LSHandlers", []):
+            if handler.get("LSHandlerURLScheme", "").lower() == "http":
+                bundle_id = handler.get("LSHandlerRoleAll", "")
+                break
+        if not bundle_id:
+            return None
+        bid = bundle_id.lower()
+        # Order matters: chromium must be tested before chrome.
+        if "chromium" in bid:
+            return "Chromium"
+        if "chrome" in bid:
+            return "Chrome"
+        if "firefox" in bid:
+            return "Firefox"
+        if "brave" in bid:
+            return "Brave"
+        if "edge" in bid:
+            return "Edge"
+        if "safari" in bid:
+            return "Safari"
+        return None
+    except Exception as exc:
+        logging.debug("Could not detect default browser: %s", exc)
+        return None
+
+
+# Cookies that indicate a real logged-in Substack session. ``substack.sid`` is the
+# session cookie Substack sets on ``.substack.com`` after login (the same one the
+# manual SID fallback uses).
+_SUBSTACK_AUTH_COOKIES = ("substack.sid",)
+
+
+def _has_substack_auth(session):
+    """True when the session carries a Substack login cookie."""
+    names = {c.name for c in session.cookies}
+    return any(name in names for name in _SUBSTACK_AUTH_COOKIES)
+
+
 def _browser_cookie_session():
     """Build a session authenticated with browser_cookie3 cookies, or None.
 
-    This reads the local browser cookie stores (and may prompt for keychain
-    access on macOS), so it is only ever called as a paywall fallback.
+    Reading a browser's cookie store triggers a macOS keychain prompt for every
+    Chromium-family browser (Chrome, Brave, Edge, Chromium each have a separate
+    "Safe Storage" keychain item, so granting one does not cover the others). To
+    keep prompts to a minimum we:
+
+      * try browsers in preference order (the browser the user is viewing the
+        dashboard in first, then the system default, then the rest);
+      * read each browser's cookies at most once, into a fresh session so a
+        browser without a login can't clobber the cookies of one that has it;
+      * stop at the *first* browser that actually carries a Substack login
+        cookie, so browsers the user isn't logged into are never touched.
+
+    This is only ever called as a paywall fallback.
     """
     if not browser_cookie3:
         return None
-    session = _plain_session()
-    loaders = [
+    _FIXED_ORDER = [
         ("Chrome", getattr(browser_cookie3, "chrome", None)),
         ("Firefox", getattr(browser_cookie3, "firefox", None)),
         ("Safari", getattr(browser_cookie3, "safari", None)),
@@ -59,19 +154,48 @@ def _browser_cookie_session():
         ("Edge", getattr(browser_cookie3, "edge", None)),
         ("Chromium", getattr(browser_cookie3, "chromium", None)),
     ]
-    loaded = False
-    for browser_name, loader in loaders:
+    default_name = _default_browser_name()
+    # Build ordered loader list: UA hint first, then system default, then rest.
+    seen = set()
+    ordered = []
+    for name in (_preferred_browser, default_name):
+        if name and name not in seen:
+            match = [e for e in _FIXED_ORDER if e[0] == name]
+            if match:
+                ordered.extend(match)
+                seen.add(name)
+                if name == _preferred_browser and _preferred_browser:
+                    logging.info("UA-hinted browser is %s; trying it first for cookies.", name)
+                elif name == default_name:
+                    logging.info("Default browser detected as %s; trying it first for cookies.", name)
+    for e in _FIXED_ORDER:
+        if e[0] not in seen:
+            ordered.append(e)
+            seen.add(e[0])
+
+    for browser_name, loader in ordered:
         if not loader:
             continue
+        candidate = _plain_session()
         try:
             logging.info("Attempting to load Substack cookies from %s.", browser_name)
-            session.cookies.update(loader(domain_name="substack.com"))
-            session.cookies.update(loader(domain_name="flowstate.fm"))
-            loaded = True
-            logging.info("Loaded Substack cookies from %s.", browser_name)
+            candidate.cookies.update(loader(domain_name="substack.com"))
         except Exception as exc:
             logging.debug("Could not load %s cookies: %s", browser_name, exc)
-    return session if loaded else None
+            continue
+        if not _has_substack_auth(candidate):
+            logging.debug("%s has no Substack login cookie; trying next browser.", browser_name)
+            continue
+        # Winning browser: also pull custom-domain cookies (same keychain item,
+        # so no extra prompt), then stop before touching any other browser.
+        try:
+            candidate.cookies.update(loader(domain_name="flowstate.fm"))
+        except Exception as exc:
+            logging.debug("Could not load %s flowstate.fm cookies: %s", browser_name, exc)
+        logging.info("Loaded Substack session from %s.", browser_name)
+        return candidate
+    logging.info("No browser had a Substack login cookie.")
+    return None
 
 
 def _sid_session():
@@ -164,16 +288,23 @@ def _looks_paywalled_html(raw_html):
 def _looks_paywalled(soup):
     """Return True when the page shows a Substack paywall gate instead of full content.
 
-    Substack renders the gate in a container with a ``paywall`` class or testid and a
-    "Subscribe to keep reading"-style call to action, so we look for both patterns.
+    The real gate is ``<div class="paywall" data-testid="paywall"
+    data-component-name="Paywall">`` plus a "Subscribe to keep reading"-style call
+    to action. We match those markers *exactly* rather than as substrings, because
+    Substack ships client-side paywall scaffolding — ``class="paywall-jump"`` and
+    ``data-component-name="PaywallToDOM"`` — to authenticated subscribers too. A
+    substring match on "paywall" flags those and would wrongly report an unlocked
+    post as gated (which broke automatic session detection).
     """
     if soup is None:
         return False
-    if soup.find(class_=re.compile(r"paywall", re.I)):
+    # Exact gate markers: class token "paywall", or the paywall testid/component.
+    if soup.find(class_="paywall"):
         return True
-    for attr in ("data-testid", "data-component-name"):
-        if soup.find(attrs={attr: re.compile(r"paywall", re.I)}):
-            return True
+    if soup.find(attrs={"data-testid": "paywall"}):
+        return True
+    if soup.find(attrs={"data-component-name": "Paywall"}):
+        return True
     text = soup.get_text(" ", strip=True).lower()
     gate_phrases = (
         "subscribe to keep reading",
@@ -211,6 +342,69 @@ def test_flowstate_fetch():
         "ok": True,
         "title": title or "Flow State",
         "mode": "Public access (browser cookies or SID used only if paywalled)",
+    }
+
+
+def check_flowstate_access():
+    """Probe Flow State and return an access-level dict.
+
+    Returns a dict with keys:
+      ``"status"``: ``"full"`` | ``"free"`` | ``"none"``
+      ``"message"``: human-readable description suitable for display in the UI.
+      ``"scanned"``: number of posts actually probed (0 on network failure).
+
+    Logic:
+    1. Fetch recent posts (limit 30). On failure → status ``"none"``.
+    2. For each post, try a plain (no-auth) fetch and check for a paywall gate.
+    3. If no post is paywalled → ``"full"`` (all readable without auth).
+    4. If a paywalled post is found, try browser-cookie session then SID session.
+       The first that un-paywalls the post → ``"full"`` (with the source noted).
+       If neither works → ``"free"``.
+    """
+    try:
+        posts = get_recent_posts(limit=30)
+    except Exception as exc:
+        return {"status": "none", "message": f"No access — Flow State unreachable: {exc}", "scanned": 0}
+
+    plain = _plain_session()
+    paywalled_url = None
+    scanned = 0
+    for post in posts:
+        url = post.get("url")
+        if not url:
+            continue
+        html = _get_html(plain, url)
+        scanned += 1
+        if html and _looks_paywalled_html(html):
+            paywalled_url = url
+            break
+
+    if paywalled_url is None:
+        return {
+            "status": "full",
+            "message": f"Full access — no paywalled posts found to test (checked {scanned})",
+            "scanned": scanned,
+        }
+
+    for builder, label in (
+        (_browser_cookie_session, "via your browser session"),
+        (_sid_session, "via your Substack SID"),
+    ):
+        candidate = builder()
+        if candidate is None:
+            continue
+        retry = _get_html(candidate, paywalled_url)
+        if retry and not _looks_paywalled_html(retry):
+            return {
+                "status": "full",
+                "message": f"Full access — paid posts unlock {label}",
+                "scanned": scanned,
+            }
+
+    return {
+        "status": "free",
+        "message": "Free posts only — automatic session detection failed; paste your SID below",
+        "scanned": scanned,
     }
 
 

@@ -77,23 +77,22 @@
         {% if cache_status and cache_status.value %}
           <span class="small">{{ cache_status.value }}</span>
         {% endif %}
+        <button formaction="{{ url_for('refresh_dashboard') }}" formmethod="post" type="submit" class="refresh-in-card">Refresh Flow State</button>
       </div>
     </div>
 
     <div class="latest-toolbar">
       <div class="hero-stats">
-        <span>{{ latest_summary.entry_count }} ready entries</span>
-        {% if latest_summary.linked_count %}<span>{{ latest_summary.linked_count }} linked albums</span>{% endif %}
-        <span>{{ latest_summary.track_count }} tracks</span>
-        {% if latest_summary.duration %}<span>{{ latest_summary.duration }}</span>{% endif %}
-        {% if latest_summary.notes %}<span>{{ latest_summary.notes }}</span>{% endif %}
+        <span title="Entries that can be played, queued, or added to a playlist right now">{{ latest_summary.playable_count }} playable</span>
+        {% if latest_summary.track_count > 0 %}<span title="Individual tracks already resolved on Spotify (albums add more when played)">{{ latest_summary.track_count }} tracks</span>{% endif %}
+        {% if latest_summary.duration %}<span title="Approximate total listening time">{{ latest_summary.duration }}</span>{% endif %}
+        {% if latest_summary.notes %}<span title="Notes from the Flow State post">{{ latest_summary.notes }}</span>{% endif %}
       </div>
       <div class="bulk-actions">
         <span class="selected-count" data-selected-count="dashboard">0 selected</span>
-        <button class="play-button" name="action" value="play" type="submit" {% if not latest_summary.actionable_count %}disabled{% endif %}>Play Latest</button>
-        <button name="action" value="queue" type="submit">Add to Queue</button>
-        <button name="action" value="playlist" type="submit">Create Playlist</button>
-        <button formaction="{{ url_for('refresh_dashboard') }}" formmethod="post" type="submit">Refresh Flow State</button>
+        <button class="play-button" name="action" value="play" type="submit" {% if not latest_summary.actionable_count %}disabled{% endif %} title="Start playing the selected entries on your Spotify device now (replaces whatever is currently playing)">Play Latest</button>
+        <button name="action" value="queue" type="submit" title="Add the selected entries to the end of your current Spotify queue">Add to Queue</button>
+        <button name="action" value="playlist" type="submit" title="Create a private Spotify playlist named after the post, containing the selected entries">Create Playlist</button>
       </div>
     </div>
 
@@ -110,9 +109,8 @@
         <p class="muted">Previous cached posts, newest first.</p>
       </div>
       <div class="archive-summary">
-        <span>{{ dashboard.archive_summary.entry_count }} ready entries</span>
-        {% if dashboard.archive_summary.linked_count %}<span>{{ dashboard.archive_summary.linked_count }} linked albums</span>{% endif %}
-        <span>{{ dashboard.archive_summary.track_count }} tracks</span>
+        <span>{{ dashboard.archive_summary.playable_count }} playable</span>
+        {% if dashboard.archive_summary.track_count %}<span>{{ dashboard.archive_summary.track_count }} tracks</span>{% endif %}
       </div>
     </div>
     {% with post_groups=dashboard.archive_posts, default_checked=false, selection_scope="archive" %}

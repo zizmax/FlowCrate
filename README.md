@@ -65,10 +65,16 @@ Then enable it:
 ```bash
 systemctl --user daemon-reload
 systemctl --user enable --now flowcrate
+loginctl enable-linger "$USER"   # keep it running after you log out / on a headless Pi
 ```
 
 Set the Pi's hostname (e.g. `flowcrate.local` via avahi/mDNS) so the Siri
 shortcut URL stays stable across reboots and IP changes.
+
+On a **headless Pi** there's no browser for Flow Crate to borrow a Substack
+session from, so automatic paywall unlocking won't work — paste your
+`SUBSTACK_SID` on the Settings page (or set it in the environment) if you want
+paid posts to resolve.
 
 One-tap Siri shortcut generation requires macOS. On Linux, use the in-app
 manual recipe in Settings, or download the shortcut once from a Mac — it keeps

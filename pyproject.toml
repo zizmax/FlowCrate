@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,8 @@ name = "flowcrate"
 dynamic = ["version"]
 description = "A personal companion app for the Flow State ambient-music newsletter: browse the latest posts and play the picks on Spotify (and optionally Sonos)."
 readme = "README.md"
+license = "MIT"
+authors = [{ name = "Nate Delgado", email = "hello@forgetalgebra.com" }]
 requires-python = ">=3.10"
 dependencies = [
     "Flask",

@@ -248,7 +248,7 @@ class SpotifyManager:
         if getattr(exc, "http_status", None) == 403 and ("scope" in text or "permission" in text):
             raise SpotifyScopeError(
                 "Spotify rejected the request because the saved auth token is missing required scopes. "
-                "Use Settings -> Start Fresh, then reconnect Spotify."
+                "Run `flowcrate --reset`, then reconnect Spotify."
             ) from exc
 
     def get_uri_from_link(self, spotify_link):

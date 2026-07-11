@@ -11,3 +11,7 @@ data/previews/
 
 data/seeds/
 samples/
+
+# Personal/dev helper scripts (kept locally, not shipped in the public repo)
+scripts/print_old_flowstate_secrets.py
+scripts/sonos_spike.py

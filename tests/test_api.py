@@ -338,6 +338,50 @@ class SettingsPageTests(unittest.TestCase):
         # The live redirect URI must be surfaced for the Spotify app setup.
         self.assertIn("http://127.0.0.1:8888/callback", html)
 
+    def test_settings_drops_5_user_note_and_reset_form(self):
+        html = self._get_settings().get_data(as_text=True)
+        self.assertNotIn("limited to 5 users", html)
+        self.assertNotIn("Start Fresh", html)
+        # Flow State section heading and new copy phrase are present.
+        self.assertIn("Flow State", html)
+        self.assertIn("Public Flow State posts work by default", html)
+        # Re-check access button replaces old test button.
+        self.assertIn("flowstate-access-btn", html)
+        self.assertNotIn("test-substack-btn", html)
+
+    def test_settings_marks_active_nav_page(self):
+        html = self._get_settings().get_data(as_text=True)
+        self.assertIn('href="/settings" class="active" aria-current="page"', html)
+
+
+class ApiTestSubstackTests(unittest.TestCase):
+    def _app(self):
+        app = create_app()
+        app.config.update(TESTING=True)
+        return app
+
+    def test_ok_case(self):
+        with patch("flowcrate.app.test_flowstate_fetch", return_value={"title": "Flow State"}):
+            response = self._app().test_client().post("/api/test-substack")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["category"], "success")
+        self.assertIn("Flow State", data["message"])
+
+    def test_error_case(self):
+        with patch("flowcrate.app.test_flowstate_fetch", side_effect=RuntimeError("blocked")):
+            response = self._app().test_client().post("/api/test-substack")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertFalse(data["ok"])
+        self.assertEqual(data["category"], "error")
+        self.assertIn("blocked", data["message"])
+
+    def test_reset_route_removed(self):
+        response = self._app().test_client().post("/settings/reset")
+        self.assertEqual(response.status_code, 404)
+
 
 class ShortcutWorkflowTests(unittest.TestCase):
     def test_url_and_token_land_in_workflow(self):
@@ -426,6 +470,299 @@ class SiriShortcutRouteTests(unittest.TestCase):
         data = response.get_json()
         self.assertFalse(data["ok"])
         self.assertEqual(data["error"], "boom")
+
+
+class ApiFlowstateAccessTests(unittest.TestCase):
+    """Tests for the GET /api/flowstate-access endpoint."""
+
+    def _app(self):
+        app = create_app()
+        app.config.update(TESTING=True)
+        return app
+
+    def test_full_status_returned(self):
+        result = {
+            "status": "full",
+            "message": "Full access — paid posts unlock via your browser session",
+            "scanned": 5,
+        }
+        with patch("flowcrate.app.check_flowstate_access", return_value=result):
+            response = self._app().test_client().get("/api/flowstate-access")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["status"], "full")
+        self.assertIn("Full access", data["message"])
+
+    def test_free_status_returned(self):
+        result = {
+            "status": "free",
+            "message": "Free posts only — automatic session detection failed; paste your SID below",
+            "scanned": 3,
+        }
+        with patch("flowcrate.app.check_flowstate_access", return_value=result):
+            response = self._app().test_client().get("/api/flowstate-access")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["status"], "free")
+        self.assertIn("Free posts only", data["message"])
+
+    def test_none_status_returned(self):
+        result = {
+            "status": "none",
+            "message": "No access — Flow State unreachable: timeout",
+            "scanned": 0,
+        }
+        with patch("flowcrate.app.check_flowstate_access", return_value=result):
+            response = self._app().test_client().get("/api/flowstate-access")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["status"], "none")
+        self.assertIn("No access", data["message"])
+
+    def test_unexpected_exception_returns_none_status(self):
+        with patch(
+            "flowcrate.app.check_flowstate_access",
+            side_effect=RuntimeError("kaboom"),
+        ):
+            response = self._app().test_client().get("/api/flowstate-access")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["status"], "none")
+        self.assertIn("kaboom", data["message"])
+
+    def test_background_refresh_triggered_when_scanned_gt_11(self):
+        result = {
+            "status": "full",
+            "message": "Full access — no paywalled posts found to test (checked 20)",
+            "scanned": 20,
+        }
+        with patch("flowcrate.app.check_flowstate_access", return_value=result), \
+             patch("flowcrate.app._start_background_refresh") as mock_refresh:
+            self._app().test_client().get("/api/flowstate-access")
+        mock_refresh.assert_called_once_with(limit=20)
+
+    def test_background_refresh_not_triggered_when_scanned_lte_11(self):
+        result = {
+            "status": "full",
+            "message": "Full access — paid posts unlock via your browser session",
+            "scanned": 5,
+        }
+        with patch("flowcrate.app.check_flowstate_access", return_value=result), \
+             patch("flowcrate.app._start_background_refresh") as mock_refresh:
+            self._app().test_client().get("/api/flowstate-access")
+        mock_refresh.assert_not_called()
+
+    def test_background_refresh_not_triggered_when_scanned_exactly_11(self):
+        result = {
+            "status": "full",
+            "message": "Full access — no paywalled posts found to test (checked 11)",
+            "scanned": 11,
+        }
+        with patch("flowcrate.app.check_flowstate_access", return_value=result), \
+             patch("flowcrate.app._start_background_refresh") as mock_refresh:
+            self._app().test_client().get("/api/flowstate-access")
+        mock_refresh.assert_not_called()
+
+
+class CheckFlowstateAccessTests(unittest.TestCase):
+    """Unit tests for check_flowstate_access() in scraper.py."""
+
+    def test_returns_scanned_key_on_none_status(self):
+        from flowcrate.scraper import check_flowstate_access
+        with patch("flowcrate.scraper.get_recent_posts", side_effect=RuntimeError("down")):
+            result = check_flowstate_access()
+        self.assertEqual(result["status"], "none")
+        self.assertIn("scanned", result)
+        self.assertEqual(result["scanned"], 0)
+
+    def test_returns_scanned_key_when_no_paywalled_posts(self):
+        from flowcrate.scraper import check_flowstate_access
+        posts = [{"url": f"https://flowstate.fm/p/post{i}"} for i in range(3)]
+        # _get_html returns content that is NOT paywalled
+        with patch("flowcrate.scraper.get_recent_posts", return_value=posts), \
+             patch("flowcrate.scraper._plain_session", return_value=object()), \
+             patch("flowcrate.scraper._get_html", return_value="<html>open content</html>"), \
+             patch("flowcrate.scraper._looks_paywalled_html", return_value=False):
+            result = check_flowstate_access()
+        self.assertEqual(result["status"], "full")
+        self.assertIn("scanned", result)
+        self.assertEqual(result["scanned"], 3)
+
+    def test_returns_scanned_key_stops_at_first_paywalled(self):
+        from flowcrate.scraper import check_flowstate_access
+        posts = [{"url": f"https://flowstate.fm/p/post{i}"} for i in range(5)]
+        # All posts look paywalled; probe stops at first one
+        with patch("flowcrate.scraper.get_recent_posts", return_value=posts), \
+             patch("flowcrate.scraper._plain_session", return_value=object()), \
+             patch("flowcrate.scraper._get_html", return_value="<html>paywall</html>"), \
+             patch("flowcrate.scraper._looks_paywalled_html", return_value=True), \
+             patch("flowcrate.scraper._browser_cookie_session", return_value=None), \
+             patch("flowcrate.scraper._sid_session", return_value=None):
+            result = check_flowstate_access()
+        self.assertIn("scanned", result)
+        self.assertEqual(result["scanned"], 1)
+
+
+class LooksPaywalledTests(unittest.TestCase):
+    """Unit tests for the _looks_paywalled_html() gate detector in scraper.py."""
+
+    def _check(self, html):
+        from flowcrate.scraper import _looks_paywalled_html
+        return _looks_paywalled_html(html)
+
+    def test_real_gate_by_testid_is_paywalled(self):
+        self.assertTrue(self._check('<div class="paywall" data-testid="paywall">x</div>'))
+
+    def test_real_gate_by_component_name_is_paywalled(self):
+        self.assertTrue(self._check('<div data-component-name="Paywall">x</div>'))
+
+    def test_gate_phrase_is_paywalled(self):
+        self.assertTrue(self._check("<p>This post is for paid subscribers</p>"))
+
+    def test_subscriber_scaffolding_is_not_paywalled(self):
+        # Substack ships these to authenticated subscribers on *unlocked* posts;
+        # a substring match on "paywall" used to flag them and break detection.
+        html = (
+            '<div class="paywall-jump"></div>'
+            '<div data-component-name="PaywallToDOM"></div>'
+            "<article>full unlocked content</article>"
+        )
+        self.assertFalse(self._check(html))
+
+    def test_open_post_is_not_paywalled(self):
+        self.assertFalse(self._check("<article>open content</article>"))
+
+
+class DefaultBrowserNameTests(unittest.TestCase):
+    """Unit tests for the _default_browser_name() scraper helper."""
+
+    def setUp(self):
+        # Clear the lru_cache between tests so each test is independent.
+        from flowcrate.scraper import _default_browser_name
+        _default_browser_name.cache_clear()
+
+    def tearDown(self):
+        from flowcrate.scraper import _default_browser_name
+        _default_browser_name.cache_clear()
+
+    def test_returns_none_when_plist_missing(self):
+        from flowcrate.scraper import _default_browser_name
+        with patch("flowcrate.scraper.Path.home", side_effect=RuntimeError("no home")):
+            result = _default_browser_name()
+        self.assertIsNone(result)
+
+    def test_returns_none_when_open_raises(self):
+        from flowcrate.scraper import _default_browser_name
+        import builtins
+        real_open = builtins.open
+
+        def fake_open(path, *a, **kw):
+            if "launchservices" in str(path).lower():
+                raise FileNotFoundError("no plist")
+            return real_open(path, *a, **kw)
+
+        with patch("builtins.open", side_effect=fake_open):
+            result = _default_browser_name()
+        self.assertIsNone(result)
+
+    def test_maps_chrome_bundle_id(self):
+        from flowcrate.scraper import _default_browser_name
+        fake_data = {
+            "LSHandlers": [
+                {"LSHandlerURLScheme": "http", "LSHandlerRoleAll": "com.google.Chrome"},
+            ]
+        }
+        with patch("flowcrate.scraper.plistlib.load", return_value=fake_data), \
+             patch("builtins.open", unittest.mock.mock_open()):
+            result = _default_browser_name()
+        self.assertEqual(result, "Chrome")
+
+    def test_maps_firefox_bundle_id(self):
+        from flowcrate.scraper import _default_browser_name
+        fake_data = {
+            "LSHandlers": [
+                {"LSHandlerURLScheme": "http", "LSHandlerRoleAll": "org.mozilla.firefox"},
+            ]
+        }
+        with patch("flowcrate.scraper.plistlib.load", return_value=fake_data), \
+             patch("builtins.open", unittest.mock.mock_open()):
+            result = _default_browser_name()
+        self.assertEqual(result, "Firefox")
+
+    def test_chromium_takes_priority_over_chrome(self):
+        """Bundle IDs containing 'chromium' must map to Chromium, not Chrome."""
+        from flowcrate.scraper import _default_browser_name
+        fake_data = {
+            "LSHandlers": [
+                {"LSHandlerURLScheme": "http", "LSHandlerRoleAll": "org.chromium.Chromium"},
+            ]
+        }
+        with patch("flowcrate.scraper.plistlib.load", return_value=fake_data), \
+             patch("builtins.open", unittest.mock.mock_open()):
+            result = _default_browser_name()
+        self.assertEqual(result, "Chromium")
+
+    def test_returns_none_when_no_http_handler(self):
+        from flowcrate.scraper import _default_browser_name
+        fake_data = {
+            "LSHandlers": [
+                {"LSHandlerURLScheme": "https", "LSHandlerRoleAll": "com.apple.safari"},
+            ]
+        }
+        with patch("flowcrate.scraper.plistlib.load", return_value=fake_data), \
+             patch("builtins.open", unittest.mock.mock_open()):
+            result = _default_browser_name()
+        self.assertIsNone(result)
+
+
+class BrowserFromUserAgentTests(unittest.TestCase):
+    """Unit tests for browser_from_user_agent() in scraper."""
+
+    def _fn(self, ua):
+        from flowcrate.scraper import browser_from_user_agent
+        return browser_from_user_agent(ua)
+
+    def test_firefox_ua(self):
+        ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:133.0) Gecko/20100101 Firefox/133.0"
+        self.assertEqual(self._fn(ua), "Firefox")
+
+    def test_edge_ua(self):
+        # Edge UA contains both "Edg/" and "Chrome/" — must resolve to Edge.
+        ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36 Edg/125.0.0.0"
+        self.assertEqual(self._fn(ua), "Edge")
+
+    def test_chrome_ua(self):
+        ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+        self.assertEqual(self._fn(ua), "Chrome")
+
+    def test_safari_ua(self):
+        ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15"
+        self.assertEqual(self._fn(ua), "Safari")
+
+    def test_unknown_ua_returns_none(self):
+        self.assertIsNone(self._fn("curl/7.88.1"))
+
+    def test_empty_ua_returns_none(self):
+        self.assertIsNone(self._fn(""))
+
+    def test_none_ua_returns_none(self):
+        self.assertIsNone(self._fn(None))
+
+
+class DashboardEntryRowClassTests(unittest.TestCase):
+    """Verify that grouped entry table rows carry class 'entry-row'."""
+
+    def test_dashboard_html_contains_entry_row_class(self):
+        from flowcrate.app import create_app
+        from tests.test_app import _dashboard_payload
+
+        app = create_app()
+        app.config.update(TESTING=True)
+        with patch("flowcrate.app.dashboard_data", return_value=_dashboard_payload()), \
+             patch("flowcrate.app.cache_is_stale", return_value=False):
+            response = app.test_client().get("/")
+        html = response.get_data(as_text=True)
+        self.assertIn('class="entry-row"', html)
 
 
 if __name__ == "__main__":
