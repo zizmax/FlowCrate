@@ -18,12 +18,11 @@
           <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer">developer.spotify.com/dashboard</a>
           and log in with the Spotify account you actually listen with (Premium is required for playback).</li>
         <li>Click <strong>Create app</strong>. Name and description can be anything
-          (e.g. "Flow Crate"). Set the <strong>Redirect URI</strong> to exactly
-          <code>{{ spotify_redirect_suggestion }}</code>
-          {% if spotify_redirect_suggestion != cfg.spotify_redirect_uri and cfg.spotify_redirect_uri %}
-            (your saved URI is <code>{{ cfg.spotify_redirect_uri }}</code>)
-          {% endif %}
-          and check the <strong>Web API</strong> box.</li>
+          (e.g. "Flow Crate"). For <strong>Redirect URI</strong> paste the exact
+          value shown in the <strong>Redirect URI</strong> box below
+          (<code>{{ spotify_redirect_uri }}</code>) — it must match character-for-character
+          (scheme, host, port, no trailing slash), so use the <strong>Copy</strong>
+          button. Click <strong>Add</strong>, then check the <strong>Web API</strong> box.</li>
         <li>Open the app's <strong>Settings</strong>, then copy the
           <strong>Client ID</strong> and <strong>Client Secret</strong> into the
           fields below.</li>
@@ -50,20 +49,22 @@
     </div>
     <label>
       Spotify Redirect URI
-      <span class="muted">Must match exactly what you registered in the Spotify dashboard.
-        Suggested: <code>{{ spotify_redirect_suggestion }}</code></span>
-      <input name="SPOTIFY_REDIRECT_URI" type="text" value="{{ spotify_redirect_value }}">
+      <span class="muted">Register this <em>exact</em> value in your Spotify app (Copy it).
+        It's derived from the address you're using to reach Flow Crate right now, so
+        Connect Spotify will send precisely this.</span>
+      <input id="spotify-redirect-input" type="text" value="{{ spotify_redirect_uri }}" readonly>
     </label>
-    {% if spotify_redirect_warn %}
-      <p class="inline-result error">This redirect URI points at <code>localhost</code>, which only works when the browser runs on the same machine as Flow Crate. Since you're accessing this from another device, use <code>{{ spotify_redirect_suggestion }}</code> instead (and register that exact value in Spotify).</p>
-    {% endif %}
+    <div class="button-row">
+      <button id="copy-redirect-btn" type="button">Copy</button>
+    </div>
     <div class="button-row">
       <button class="primary" name="action" value="save" type="submit">Save Settings</button>
       <button name="action" value="test_spotify" type="submit">Test Spotify</button>
       <a class="button" href="/spotify/login">Connect Spotify</a>
-      {% if test_results.spotify %}
-        <span class="inline-result {{ test_results.spotify.category }}">{{ test_results.spotify.message }}</span>
-      {% endif %}
+    </div>
+    {% if test_results.spotify %}
+      <p class="inline-result {{ test_results.spotify.category }}">{{ test_results.spotify.message }}</p>
+    {% endif %}
     </div>
 
     <div class="section-heading">
@@ -349,6 +350,7 @@
     wireCopy("api-token-input", "copy-token-btn");
     wireShowHide("spotify-secret-input", "toggle-secret-btn");
     wireCopy("spotify-secret-input", "copy-secret-btn");
+    wireCopy("spotify-redirect-input", "copy-redirect-btn");
     wireShowHide("flowstate-sid-input", "toggle-sid-btn");
     wireCopy("flowstate-sid-input", "copy-sid-btn");
 

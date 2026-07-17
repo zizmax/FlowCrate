@@ -35,7 +35,7 @@ from .cache import (
     refresh_from_flowstate,
     selected_track_uris,
 )
-from .config import load_config, masked, read_saved_values, reset_local_config, save_config, save_config_values
+from .config import load_config, masked, reset_local_config, save_config, save_config_values
 from .logs import list_logs, read_log
 from .paths import CONFIG_FILE, LOGS_DIR, TOKEN_CACHE, ensure_dirs
 from .playback import DevicePickerRequired, resolve_playback_target
@@ -143,18 +143,16 @@ def _request_hostname():
 
 
 def _effective_redirect_uri(https_port):
-    """The redirect URI to use for OAuth.
+    """The redirect URI to use for OAuth — always derived from the request host.
 
-    Prefers an explicitly-saved SPOTIFY_REDIRECT_URI; otherwise derives it from
-    the hostname the browser actually used to reach this page (so opening the UI
-    at ``pi.local:8765`` yields ``https://pi.local:8443/callback`` with no config
-    needed). Both /spotify/login and /callback resolve to the same value because
-    they derive the same hostname, which is what Spotify requires for the code
-    exchange to succeed.
+    Spotify requires the redirect_uri we send to *exactly* match one registered
+    in the user's app, and it must also be reachable by the browser. Both are
+    satisfied by deriving it from the hostname the browser actually used to reach
+    us (opening the UI at ``pi.local:8765`` yields ``https://pi.local:8443/callback``).
+    We deliberately do NOT use a saved/config value here: /spotify/login and
+    /callback both derive the same hostname, so what the Settings page tells the
+    user to register is exactly what gets sent — no drift, no mismatch.
     """
-    saved = read_saved_values().get("SPOTIFY_REDIRECT_URI")
-    if saved:
-        return saved
     return f"https://{_request_hostname()}:{https_port}/callback"
 
 
@@ -297,7 +295,7 @@ def create_app():
                 except SpotifyAuthRequired:
                     test_results["spotify"] = {
                         "category": "error",
-                        "message": "Not connected — click Connect Spotify below.",
+                        "message": "Not connected yet — click the Connect Spotify button above.",
                     }
                 except Exception as exc:
                     test_results["spotify"] = {"category": "error", "message": f"Spotify test failed: {exc}"}
@@ -305,15 +303,9 @@ def create_app():
                 flash("Settings saved.", "success")
             cfg = load_config()
         https_port = app.config.get("HTTPS_PORT", 8443)
-        # Suggest (and, when unset, prefill) a redirect URI that matches the
-        # hostname the browser actually used, so the Pi case works by default.
-        spotify_redirect_suggestion = f"https://{_request_hostname()}:{https_port}/callback"
-        spotify_redirect_value = read_saved_values().get("SPOTIFY_REDIRECT_URI") or spotify_redirect_suggestion
-        # Warn when the effective redirect points at loopback but the page was
-        # reached from another device — that redirect can never come back here.
-        redirect_is_loopback = any(h in spotify_redirect_value for h in ("localhost", "127.0.0.1"))
-        accessed_remotely = _request_hostname() not in ("localhost", "127.0.0.1")
-        spotify_redirect_warn = redirect_is_loopback and accessed_remotely
+        # This is the exact redirect URI /spotify/login will send — show it so the
+        # user registers precisely this value in their Spotify app (no drift).
+        spotify_redirect_uri = _effective_redirect_uri(https_port)
         return render_template(
             "settings.html",
             cfg=cfg,
@@ -325,9 +317,7 @@ def create_app():
             is_macos=platform.system() == "Darwin",
             universal_host_placeholder=UNIVERSAL_HOST_PLACEHOLDER,
             universal_token=UNIVERSAL_TOKEN,
-            spotify_redirect_suggestion=spotify_redirect_suggestion,
-            spotify_redirect_value=spotify_redirect_value,
-            spotify_redirect_warn=spotify_redirect_warn,
+            spotify_redirect_uri=spotify_redirect_uri,
             https_port=https_port,
         )
 
