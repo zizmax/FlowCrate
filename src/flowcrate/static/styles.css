@@ -776,6 +776,32 @@ code {
     font-size: 30px;
   }
 
+  /* Nested grid/flex items default to min-width:auto, so they refuse to shrink
+     below their content and push the whole page wider than the viewport (which
+     makes mobile render the desktop layout scaled down, with a misaligned
+     sticky topbar). Let them collapse to the available width instead. */
+  .dashboard-form,
+  .latest-panel,
+  .archive-panel {
+    min-width: 0;
+  }
+
+  .latest-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* Stack the space-between rows so the title/cache card and the stats/actions
+     sit vertically instead of fighting for a single line. */
+  .split,
+  .latest-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cache-card {
+    min-width: 0;
+  }
+
   .bulk-actions {
     justify-content: flex-start;
   }

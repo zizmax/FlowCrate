@@ -27,7 +27,7 @@ LEGACY_ENV_KEYS = [
 class AppConfig:
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
-    spotify_redirect_uri: str = "http://127.0.0.1:8888/callback"
+    spotify_redirect_uri: str = "https://localhost:8443/callback"
     substack_sid: str = ""
     flowstate_connect_sid: str = ""
     sonos_ip: str = ""
@@ -61,7 +61,7 @@ def load_config():
         spotify_redirect_uri=(
             os.getenv("SPOTIFY_REDIRECT_URI", "")
             or os.getenv("SPOTIPY_REDIRECT_URI", "")
-            or "http://127.0.0.1:8888/callback"
+            or "https://localhost:8443/callback"
         ),
         substack_sid=os.getenv("SUBSTACK_SID", ""),
         flowstate_connect_sid=os.getenv("FLOWSTATE_CONNECT_SID", ""),
@@ -87,7 +87,7 @@ def save_config(form_values):
             val = ""
         merged[key] = val.strip()
     if not merged.get("SPOTIFY_REDIRECT_URI"):
-        merged["SPOTIFY_REDIRECT_URI"] = "http://127.0.0.1:8888/callback"
+        merged["SPOTIFY_REDIRECT_URI"] = "https://localhost:8443/callback"
 
     lines = []
     for key in KNOWN_KEYS:
@@ -111,7 +111,7 @@ def save_config_values(updates):
         if key in KNOWN_KEYS:
             merged[key] = (val or "").strip()
     if not merged.get("SPOTIFY_REDIRECT_URI"):
-        merged["SPOTIFY_REDIRECT_URI"] = "http://127.0.0.1:8888/callback"
+        merged["SPOTIFY_REDIRECT_URI"] = "https://localhost:8443/callback"
     lines = []
     for key in KNOWN_KEYS:
         val = merged.get(key, "")

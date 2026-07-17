@@ -3,6 +3,7 @@ import logging
 import logging.handlers
 import os
 import platform
+import secrets
 import socket
 import subprocess
 import sys
@@ -34,7 +35,7 @@ from .cache import (
     refresh_from_flowstate,
     selected_track_uris,
 )
-from .config import load_config, masked, reset_local_config, save_config, save_config_values
+from .config import load_config, masked, read_saved_values, reset_local_config, save_config, save_config_values
 from .logs import list_logs, read_log
 from .paths import CONFIG_FILE, LOGS_DIR, TOKEN_CACHE, ensure_dirs
 from .playback import DevicePickerRequired, resolve_playback_target
@@ -53,12 +54,20 @@ from .shortcut import (
     signed_shortcut,
     unsigned_shortcut,
 )
-from .spotify import SpotifyManager, SpotifyRateLimitError
+from .spotify import SPOTIFY_SCOPE, SpotifyAuthRequired, SpotifyManager, SpotifyRateLimitError
 
 # Single-flight background refresh: page load, tab focus, and the API may all trigger
 # at once; only one refresh ever runs at a time.
 _REFRESH_LOCK = threading.Lock()
 _REFRESH_STATE = {"running": False}
+
+# OAuth state store: maps state token -> expiry timestamp.
+# Used instead of Flask session cookies because the http UI origin and the
+# https /callback origin differ (different ports), so session cookies are
+# NOT shared between the two listeners.
+_OAUTH_STATE_LOCK = threading.Lock()
+_OAUTH_STATES: dict[str, float] = {}
+_OAUTH_STATE_TTL = 600  # 10 minutes
 
 _LOG_FORMAT = "%(asctime)s [%(levelname)s] %(message)s"
 
@@ -111,6 +120,57 @@ def _refresh_status():
     with _REFRESH_LOCK:
         running = _REFRESH_STATE["running"]
     return {"refreshing": running, "refreshed_at": last_refreshed_at(), "stale": cache_is_stale()}
+
+
+def _oauth_state_add(state: str) -> None:
+    """Store an OAuth state token with a ~10-minute TTL."""
+    with _OAUTH_STATE_LOCK:
+        _OAUTH_STATES[state] = time.time() + _OAUTH_STATE_TTL
+
+
+def _oauth_state_consume(state: str) -> bool:
+    """Return True and remove the state if it exists and has not expired."""
+    with _OAUTH_STATE_LOCK:
+        expiry = _OAUTH_STATES.pop(state, None)
+    if expiry is None:
+        return False
+    return time.time() <= expiry
+
+
+def _request_hostname():
+    """The hostname the current request used to reach us (no port), e.g. pi.local."""
+    return request.host.rsplit(":", 1)[0]
+
+
+def _effective_redirect_uri(https_port):
+    """The redirect URI to use for OAuth.
+
+    Prefers an explicitly-saved SPOTIFY_REDIRECT_URI; otherwise derives it from
+    the hostname the browser actually used to reach this page (so opening the UI
+    at ``pi.local:8765`` yields ``https://pi.local:8443/callback`` with no config
+    needed). Both /spotify/login and /callback resolve to the same value because
+    they derive the same hostname, which is what Spotify requires for the code
+    exchange to succeed.
+    """
+    saved = read_saved_values().get("SPOTIFY_REDIRECT_URI")
+    if saved:
+        return saved
+    return f"https://{_request_hostname()}:{https_port}/callback"
+
+
+def _spotify_oauth(redirect_uri=None):
+    """Build a SpotifyOAuth from the current config (never opens a browser)."""
+    from spotipy.oauth2 import SpotifyOAuth
+
+    cfg = load_config()
+    return SpotifyOAuth(
+        client_id=cfg.spotify_client_id,
+        client_secret=cfg.spotify_client_secret,
+        redirect_uri=redirect_uri or cfg.spotify_redirect_uri,
+        scope=SPOTIFY_SCOPE,
+        cache_path=str(TOKEN_CACHE),
+        open_browser=False,
+    )
 
 
 def create_app():
@@ -210,6 +270,8 @@ def create_app():
                     "track_count": len(track_uris),
                 }
             )
+        except SpotifyAuthRequired as exc:
+            flash(str(exc), "error")
         except SpotifyRateLimitError as exc:
             flash(str(exc), "warning")
         except Exception as exc:
@@ -232,11 +294,26 @@ def create_app():
                         "category": "success",
                         "message": f"Connected as {spotify.display_name}.",
                     }
+                except SpotifyAuthRequired:
+                    test_results["spotify"] = {
+                        "category": "error",
+                        "message": "Not connected — click Connect Spotify below.",
+                    }
                 except Exception as exc:
                     test_results["spotify"] = {"category": "error", "message": f"Spotify test failed: {exc}"}
             else:
                 flash("Settings saved.", "success")
             cfg = load_config()
+        https_port = app.config.get("HTTPS_PORT", 8443)
+        # Suggest (and, when unset, prefill) a redirect URI that matches the
+        # hostname the browser actually used, so the Pi case works by default.
+        spotify_redirect_suggestion = f"https://{_request_hostname()}:{https_port}/callback"
+        spotify_redirect_value = read_saved_values().get("SPOTIFY_REDIRECT_URI") or spotify_redirect_suggestion
+        # Warn when the effective redirect points at loopback but the page was
+        # reached from another device — that redirect can never come back here.
+        redirect_is_loopback = any(h in spotify_redirect_value for h in ("localhost", "127.0.0.1"))
+        accessed_remotely = _request_hostname() not in ("localhost", "127.0.0.1")
+        spotify_redirect_warn = redirect_is_loopback and accessed_remotely
         return render_template(
             "settings.html",
             cfg=cfg,
@@ -248,6 +325,10 @@ def create_app():
             is_macos=platform.system() == "Darwin",
             universal_host_placeholder=UNIVERSAL_HOST_PLACEHOLDER,
             universal_token=UNIVERSAL_TOKEN,
+            spotify_redirect_suggestion=spotify_redirect_suggestion,
+            spotify_redirect_value=spotify_redirect_value,
+            spotify_redirect_warn=spotify_redirect_warn,
+            https_port=https_port,
         )
 
     @app.route("/api/test-substack", methods=["POST"])
@@ -503,6 +584,59 @@ def create_app():
             download_name="Play Flow Crate.shortcut",
         )
 
+    @app.route("/spotify/login")
+    def spotify_login():
+        """Start the Spotify OAuth flow by redirecting to Spotify's auth page."""
+        cfg = load_config()
+        if not cfg.spotify_client_id or not cfg.spotify_client_secret:
+            flash("Set your Spotify Client ID and Secret in Settings first.", "error")
+            return redirect(url_for("settings"))
+        state = secrets.token_urlsafe(24)
+        _oauth_state_add(state)
+        https_port = app.config.get("HTTPS_PORT", 8443)
+        oauth = _spotify_oauth(redirect_uri=_effective_redirect_uri(https_port))
+        return redirect(oauth.get_authorize_url(state=state))
+
+    @app.route("/callback")
+    def spotify_callback():
+        """Receive the Spotify OAuth callback and exchange code for a token.
+
+        This route is reached on the HTTPS listener (different port from the
+        main HTTP server). The redirect back to settings uses the http port
+        stored in app.config so the user ends up on the correct origin.
+        """
+        error = request.args.get("error")
+        code = request.args.get("code")
+        state = request.args.get("state", "")
+
+        http_port = app.config.get("HTTP_PORT", 8765)
+        settings_url = f"http://{_local_hostname()}:{http_port}/settings"
+
+        if error:
+            flash(f"Spotify authorization failed: {error}", "error")
+            return redirect(settings_url)
+
+        if not _oauth_state_consume(state):
+            flash("Invalid or expired OAuth state. Please try connecting again.", "error")
+            return redirect(settings_url)
+
+        if not code:
+            flash("No authorization code received from Spotify.", "error")
+            return redirect(settings_url)
+
+        try:
+            https_port = app.config.get("HTTPS_PORT", 8443)
+            oauth = _spotify_oauth(redirect_uri=_effective_redirect_uri(https_port))
+            # as_dict=False writes token to cache and returns the token dict.
+            oauth.get_access_token(code, as_dict=False, check_cache=False)
+        except Exception as exc:
+            logging.exception("Spotify OAuth token exchange failed")
+            flash(f"Could not complete Spotify connection: {exc}", "error")
+            return redirect(settings_url)
+
+        flash("Spotify connected.", "success")
+        return redirect(settings_url)
+
     return app
 
 
@@ -686,10 +820,35 @@ def _print_startup_banner(url, extra_urls=()):
     print(f"     (it starts at login and restarts itself; remove with {uninstall}).")
 
 
+def _start_https_listener(app, host, https_port, cert_path, key_path):
+    """Start the HTTPS callback listener in a daemon thread.
+
+    Runs Werkzeug's make_server with a self-signed TLS context. This is the
+    only listener that handles /callback (Spotify's redirect_uri). The main
+    HTTP server is unaffected.
+    """
+    try:
+        from werkzeug.serving import make_server
+
+        srv = make_server(host, https_port, app, ssl_context=(cert_path, key_path))
+        t = threading.Thread(target=srv.serve_forever, daemon=True, name="https-callback")
+        t.start()
+        logging.info("HTTPS callback listener started on port %d.", https_port)
+    except Exception:
+        logging.warning(
+            "Could not start HTTPS callback listener on port %d — "
+            "Spotify OAuth connect flow unavailable. HTTP server continues.",
+            https_port,
+            exc_info=True,
+        )
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Run the Flow Crate local web UI.")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--https-port", type=int, default=8443,
+                        help="Port for the HTTPS-only Spotify OAuth callback listener (default 8443).")
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument(
         "--reset",
@@ -736,6 +895,24 @@ def main(argv=None):
         return
 
     app = create_app()
+
+    # Store ports in app config so routes can reference them.
+    app.config["HTTP_PORT"] = args.port
+    app.config["HTTPS_PORT"] = args.https_port
+
+    # Generate TLS cert and start the HTTPS callback listener.
+    try:
+        from .tls import ensure_cert
+
+        ip = _local_ip()
+        cert_path, key_path = ensure_cert(hostname=_local_hostname(), local_ip=ip)
+        _start_https_listener(app, args.host, args.https_port, cert_path, key_path)
+    except Exception:
+        logging.warning(
+            "TLS cert generation failed — HTTPS callback listener will not start.",
+            exc_info=True,
+        )
+
     if args.host == "0.0.0.0":
         # Bound to all interfaces: lead with the network address (so a headless
         # host prints a URL other devices can actually use), then the IP and
@@ -752,6 +929,7 @@ def main(argv=None):
         extras = []
         open_url = primary
     _print_startup_banner(primary, extras)
+    print(f"     HTTPS callback listener: https://localhost:{args.https_port}/callback")
     if not args.no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(open_url)).start()
     # Never enable Flask debug mode: the Werkzeug debugger allows code execution

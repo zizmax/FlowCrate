@@ -13,6 +13,15 @@ from .paths import LOCAL_STATE_DIR, TOKEN_CACHE, ensure_dirs
 
 SPOTIFY_STATE_FILE = LOCAL_STATE_DIR / "spotify_state.json"
 
+SPOTIFY_SCOPE = (
+    "playlist-modify-private playlist-modify-public playlist-read-private "
+    "user-modify-playback-state user-read-playback-state"
+)
+
+
+class SpotifyAuthRequired(RuntimeError):
+    pass
+
 
 class SpotifyScopeError(RuntimeError):
     pass
@@ -35,10 +44,7 @@ class SpotifyManager:
         if not cfg.spotify_client_id or not cfg.spotify_client_secret:
             raise ValueError("Missing Spotify Client ID or Client Secret in Settings.")
 
-        self.scope = (
-            "playlist-modify-private playlist-modify-public playlist-read-private "
-            "user-modify-playback-state user-read-playback-state"
-        )
+        self.scope = SPOTIFY_SCOPE
         self.auth_manager = SpotifyOAuth(
             client_id=cfg.spotify_client_id,
             client_secret=cfg.spotify_client_secret,
@@ -46,7 +52,17 @@ class SpotifyManager:
             scope=self.scope,
             cache_path=str(TOKEN_CACHE),
             show_dialog=True,
+            open_browser=False,
         )
+        # Validate an existing cached token without binding any local HTTP server.
+        # validate_token refreshes via the refresh token if needed, or returns None.
+        token = self.auth_manager.validate_token(
+            self.auth_manager.cache_handler.get_cached_token()
+        )
+        if not token:
+            raise SpotifyAuthRequired(
+                "Spotify isn't connected yet. Open Settings and click 'Connect Spotify'."
+            )
         self.sp = spotipy.Spotify(auth_manager=self.auth_manager)
         self.user_info = self.sp.current_user()
         self.user_id = self.user_info["id"]

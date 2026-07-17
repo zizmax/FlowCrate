@@ -18,6 +18,7 @@ dependencies = [
     "browser_cookie3",
     "spotipy",
     "soco",
+    "cryptography",
 ]
 
 [project.scripts]

@@ -350,8 +350,9 @@ class SettingsPageTests(unittest.TestCase):
         html = self._get_settings().get_data(as_text=True)
         self.assertIn("First time? Create your Spotify app (2 minutes)", html)
         self.assertIn("developer.spotify.com/dashboard", html)
-        # The live redirect URI must be surfaced for the Spotify app setup.
-        self.assertIn("http://127.0.0.1:8888/callback", html)
+        # The https callback URI suggestion must be surfaced for the Spotify app setup.
+        self.assertIn("/callback", html)
+        self.assertIn("Connect Spotify", html)
 
     def test_settings_drops_5_user_note_and_reset_form(self):
         html = self._get_settings().get_data(as_text=True)
