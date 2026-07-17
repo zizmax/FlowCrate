@@ -854,12 +854,12 @@ def main(argv=None):
     service_group.add_argument(
         "--install-service",
         action="store_true",
-        help="Install and load a macOS launchd agent so Flow Crate runs at login.",
+        help="Run Flow Crate automatically in the background (macOS launchd / Linux systemd).",
     )
     service_group.add_argument(
         "--uninstall-service",
         action="store_true",
-        help="Unload and remove the macOS launchd agent.",
+        help="Remove the background service (macOS launchd / Linux systemd).",
     )
     args = parser.parse_args(argv)
 
