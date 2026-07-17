@@ -423,7 +423,6 @@ class ShortcutWorkflowTests(unittest.TestCase):
                 "is.workflow.actions.getvalueforkey",
                 "is.workflow.actions.speaktext",
                 "is.workflow.actions.showresult",
-                "is.workflow.actions.output",
             ],
         )
 
@@ -440,9 +439,8 @@ class ShortcutWorkflowTests(unittest.TestCase):
         # Get Dictionary Value must consume the URL response explicitly.
         self.assertEqual(dict_params["WFInput"]["Value"]["OutputUUID"], download_uuid)
         self.assertEqual(dict_params["WFInput"]["Value"]["Type"], "ActionOutput")
-        # Speak Text, Show Result, and Stop and Output must reference the
-        # dictionary value.
-        for idx, key in ((2, "WFText"), (3, "Text"), (4, "WFOutput")):
+        # Speak Text and Show Result must reference the dictionary value.
+        for idx, key in ((2, "WFText"), (3, "Text")):
             text = actions[idx]["WFWorkflowActionParameters"][key]["Value"]
             attachment = text["attachmentsByRange"]["{0, 1}"]
             self.assertEqual(attachment["OutputUUID"], dict_uuid)

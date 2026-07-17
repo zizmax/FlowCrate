@@ -123,15 +123,6 @@ def build_workflow(url, token):
                     "Text": _text_with_output("Dictionary Value", dict_value_uuid),
                 },
             },
-            # Stop and Output makes the text retrievable from the command line
-            # (shortcuts run "Play Flow Crate" --output-path \u2026) for debugging.
-            {
-                "WFWorkflowActionIdentifier": "is.workflow.actions.output",
-                "WFWorkflowActionParameters": {
-                    "WFOutput": _text_with_output("Dictionary Value", dict_value_uuid),
-                    "WFNoOutputSurfaceBehavior": "Do Nothing",
-                },
-            },
         ],
     }
 
