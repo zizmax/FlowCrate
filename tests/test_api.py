@@ -1,4 +1,5 @@
 import unittest
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 from flowcrate.app import create_app
@@ -129,6 +130,7 @@ class ApiPlayLatestTests(unittest.TestCase):
         with patch("flowcrate.app.load_config", return_value=_cfg()), \
              patch("flowcrate.app.cache_is_stale", return_value=True), \
              patch("flowcrate.app.refresh_from_flowstate") as refresh, \
+             patch("flowcrate.app._start_background_refresh") as background, \
              patch("flowcrate.app.latest_cached_post", return_value=(post, entries)), \
              patch("flowcrate.app.sonos.get_speaker", return_value=MagicMock()), \
              patch("flowcrate.app.sonos.queue_and_play", return_value=queue_result):
@@ -137,7 +139,9 @@ class ApiPlayLatestTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        refresh.assert_called_once_with(limit=2)
+        refresh.assert_called_once_with(limit=2, catch_up=False)
+        # The quick refresh is followed by a full background one that fills any gap.
+        background.assert_called_once_with(limit=11)
 
     def test_refresh_runs_when_latest_post_not_cached(self):
         app = create_app()
@@ -151,6 +155,7 @@ class ApiPlayLatestTests(unittest.TestCase):
              patch("flowcrate.app.get_recent_posts", return_value=[post]), \
              patch("flowcrate.app.has_cached_post", return_value=False), \
              patch("flowcrate.app.refresh_from_flowstate") as refresh, \
+             patch("flowcrate.app._start_background_refresh") as background, \
              patch("flowcrate.app.latest_cached_post", return_value=(post, entries)), \
              patch("flowcrate.app.sonos.get_speaker", return_value=MagicMock()), \
              patch("flowcrate.app.sonos.queue_and_play", return_value=queue_result):
@@ -159,7 +164,9 @@ class ApiPlayLatestTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        refresh.assert_called_once_with(limit=2)
+        refresh.assert_called_once_with(limit=2, catch_up=False)
+        # The quick refresh is followed by a full background one that fills any gap.
+        background.assert_called_once_with(limit=11)
 
     def test_no_playable_items_returns_400(self):
         app = create_app()
@@ -345,6 +352,8 @@ class SettingsPageTests(unittest.TestCase):
         self.assertIn("Download universal shortcut", html)
         self.assertIn("Download ready-to-use (unsigned)", html)
         self.assertIn("/api/siri-shortcut/universal", html)
+        self.assertIn("Rewind Flow Crate", html)
+        self.assertIn("/api/siri-shortcut?rewind=1", html)
 
     def test_settings_renders_spotify_onboarding(self):
         html = self._get_settings().get_data(as_text=True)
@@ -399,6 +408,84 @@ class ApiTestSubstackTests(unittest.TestCase):
         self.assertEqual(response.status_code, 404)
 
 
+class ApiPlayDayTests(unittest.TestCase):
+    """The Rewind Flow Crate shortcut sends {"day": "<what the user said>"}."""
+
+    def _post(self, body, **patches):
+        app = create_app()
+        app.config.update(TESTING=True)
+        queue_result = {"queued": 2, "first_position": 1, "room": "Office"}
+        with patch("flowcrate.app.load_config", return_value=_cfg()), \
+             patch("flowcrate.app._ensure_latest_cached"), \
+             patch("flowcrate.app.date", wraps=date) as fake_date, \
+             patch("flowcrate.dates.date", wraps=date) as fake_dates_date, \
+             patch("flowcrate.app.cached_post_on", **patches.get("cached_post_on", {"return_value": (None, [])})) as cached_on, \
+             patch("flowcrate.app.find_archive_posts", **patches.get("find_archive_posts", {"return_value": ([], None)})) as archive, \
+             patch("flowcrate.app.cache_post", **patches.get("cache_post", {})) as cache_post, \
+             patch("flowcrate.app.latest_cached_post") as latest, \
+             patch("flowcrate.app.sonos.get_speaker", return_value=MagicMock()), \
+             patch("flowcrate.app.sonos.queue_and_play", return_value=queue_result) as queue_and_play:
+            fake_date.today.return_value = date(2026, 10, 23)
+            fake_dates_date.today.return_value = date(2026, 10, 23)
+            response = app.test_client().post(
+                "/api/play-latest", headers={"X-FlowCrate-Token": "secret"}, json=body
+            )
+        return response, {"cached_on": cached_on, "archive": archive, "cache_post": cache_post,
+                          "latest": latest, "queue_and_play": queue_and_play}
+
+    def test_yesterday_served_from_cache(self):
+        post = {"title": "Hermanos Gutiérrez", "date": "2026-10-22", "url": "https://x/hg"}
+        response, mocks = self._post(
+            {"day": "yesterday"},
+            cached_post_on={"return_value": (post, [_entry("spotify:album:a"), _entry("spotify:album:b")])},
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["post"]["date"], "2026-10-22")
+        self.assertEqual(data["speak"], "Playing Hermanos Gutiérrez from Thursday, October 22. 2 tracks on Office.")
+        mocks["cached_on"].assert_called_once_with("2026-10-22")
+        mocks["archive"].assert_not_called()
+        mocks["latest"].assert_not_called()
+
+    def test_uncached_day_is_fetched_from_archive(self):
+        found = {"title": "Julia Gjertsen", "date": "2026-10-21", "url": "https://x/jg"}
+        response, mocks = self._post(
+            {"day": "last Wednesday"},
+            find_archive_posts={"return_value": ([found], None)},
+            cache_post={"return_value": (found, [_entry("spotify:album:a"), _entry("spotify:album:b")])},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Playing Julia Gjertsen from Wednesday, October 21.", response.get_json()["speak"])
+        mocks["archive"].assert_called_once_with("2026-10-21")
+        mocks["cache_post"].assert_called_once_with(found)
+
+    def test_day_without_post_plays_closest_earlier_post(self):
+        earlier = {"title": "Charanjit Singh", "date": "2026-10-16", "url": "https://x/cs"}
+        response, mocks = self._post(
+            {"day": "October 18"},
+            find_archive_posts={"return_value": ([], earlier)},
+            cache_post={"return_value": (earlier, [_entry("spotify:album:a"), _entry("spotify:album:b")])},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.get_json()["speak"],
+            "There's no Flow State post on Sunday, October 18. "
+            "Playing Charanjit Singh from Friday, October 16 instead. 2 tracks on Office.",
+        )
+
+    def test_today_or_blank_plays_latest(self):
+        for body in ({"day": "today"}, {"day": ""}, {}):
+            _, mocks = self._post(body)
+            mocks["cached_on"].assert_not_called()
+            mocks["latest"].assert_called_once()
+
+    def test_unreadable_day_asks_again(self):
+        response, mocks = self._post({"day": "banana"})
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("didn't catch which day", response.get_json()["speak"])
+        mocks["queue_and_play"].assert_not_called()
+
+
 class ShortcutWorkflowTests(unittest.TestCase):
     def test_url_and_token_land_in_workflow(self):
         from flowcrate.shortcut import build_workflow
@@ -448,6 +535,43 @@ class ShortcutWorkflowTests(unittest.TestCase):
             self.assertEqual(text["string"], "￼")
 
 
+class RewindShortcutWorkflowTests(unittest.TestCase):
+    def test_play_shortcut_sends_empty_body(self):
+        from flowcrate.shortcut import build_workflow
+
+        download = build_workflow("http://x/api/play-latest", "tok")["WFWorkflowActions"][0]
+        self.assertEqual(download["WFWorkflowActionParameters"]["WFJSONValues"]["Value"]["WFDictionaryFieldValueItems"], [])
+
+    def test_rewind_asks_which_day_and_sends_it(self):
+        from flowcrate.shortcut import build_workflow
+
+        actions = build_workflow("http://x/api/play-latest", "tok", ask_day=True)["WFWorkflowActions"]
+        self.assertEqual(
+            [a["WFWorkflowActionIdentifier"] for a in actions],
+            [
+                "is.workflow.actions.ask",
+                "is.workflow.actions.downloadurl",
+                "is.workflow.actions.getvalueforkey",
+                "is.workflow.actions.speaktext",
+                "is.workflow.actions.showresult",
+            ],
+        )
+        ask = actions[0]["WFWorkflowActionParameters"]
+        self.assertEqual(ask["WFAskActionPrompt"], "Which day?")
+        self.assertEqual(ask["WFInputType"], "Text")
+        body = actions[1]["WFWorkflowActionParameters"]["WFJSONValues"]["Value"]["WFDictionaryFieldValueItems"]
+        self.assertEqual(len(body), 1)
+        self.assertEqual(body[0]["WFKey"]["Value"]["string"], "day")
+        attachment = body[0]["WFValue"]["Value"]["attachmentsByRange"]["{0, 1}"]
+        self.assertEqual(attachment["OutputUUID"], ask["UUID"])
+        self.assertEqual(attachment["OutputName"], "Provided Input")
+        # The dictionary lookup still reads the URL response, not the question.
+        self.assertEqual(
+            actions[2]["WFWorkflowActionParameters"]["WFInput"]["Value"]["OutputUUID"],
+            actions[1]["WFWorkflowActionParameters"]["UUID"],
+        )
+
+
 class SiriShortcutRouteTests(unittest.TestCase):
     def _app(self):
         app = create_app()
@@ -488,6 +612,17 @@ class SiriShortcutRouteTests(unittest.TestCase):
         self.assertIn("/api/play-latest", params["WFURL"])
         header = params["WFHTTPHeaders"]["Value"]["WFDictionaryFieldValueItems"][0]
         self.assertEqual(header["WFValue"]["Value"]["string"], "tok42")
+
+    def test_rewind_returns_unsigned_rewind_on_non_macos(self):
+        import plistlib
+
+        with patch("flowcrate.app.load_config", return_value=_cfg(api_token="tok42")), \
+             patch("flowcrate.app.platform.system", return_value="Linux"):
+            response = self._app().test_client().get("/api/siri-shortcut?rewind=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Rewind Flow Crate.shortcut", response.headers["Content-Disposition"])
+        workflow = plistlib.loads(response.data)
+        self.assertEqual(workflow["WFWorkflowActions"][0]["WFWorkflowActionIdentifier"], "is.workflow.actions.ask")
 
     def test_universal_route_returns_bundled_attachment(self):
         response = self._app().test_client().get("/api/siri-shortcut/universal")

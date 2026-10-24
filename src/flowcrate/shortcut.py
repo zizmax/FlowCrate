@@ -1,4 +1,4 @@
-"""Generate and sign the "Play Flow Crate" Apple Shortcut."""
+"""Generate and sign the "Play Flow Crate" and "Rewind Flow Crate" Apple Shortcuts."""
 
 import os
 import plistlib
@@ -17,6 +17,16 @@ class ShortcutError(RuntimeError):
 UNIVERSAL_HOST_PLACEHOLDER = "YOUR-PI-HOSTNAME.local:8765"
 UNIVERSAL_URL = f"http://{UNIVERSAL_HOST_PLACEHOLDER}/api/play-latest"
 UNIVERSAL_TOKEN = "YOUR-API-TOKEN"
+
+# The shortcut's name is its Siri phrase. Rewind asks "Which day?" and sends the
+# answer as {"day": ...}, so new date wordings never need a shortcut update.
+PLAY_NAME = "Play Flow Crate"
+REWIND_NAME = "Rewind Flow Crate"
+REWIND_PROMPT = "Which day?"
+
+
+def shortcut_name(ask_day=False):
+    return REWIND_NAME if ask_day else PLAY_NAME
 
 
 def _text(value):
@@ -53,12 +63,34 @@ def _text_with_output(output_name, output_uuid):
     }
 
 
-def build_workflow(url, token):
+def build_workflow(url, token, ask_day=False):
     # Actions don't chain implicitly in generated files: downstream parameters
     # must reference the upstream action's output by UUID (the "magic variable"
     # wiring the Shortcuts editor normally adds for you).
     download_uuid = str(uuid.uuid4()).upper()
     dict_value_uuid = str(uuid.uuid4()).upper()
+    ask_actions = []
+    body_items = []
+    if ask_day:
+        ask_uuid = str(uuid.uuid4()).upper()
+        # Under Siri, Ask for Input speaks the prompt and listens for the answer.
+        ask_actions.append(
+            {
+                "WFWorkflowActionIdentifier": "is.workflow.actions.ask",
+                "WFWorkflowActionParameters": {
+                    "UUID": ask_uuid,
+                    "WFAskActionPrompt": REWIND_PROMPT,
+                    "WFInputType": "Text",
+                },
+            }
+        )
+        body_items.append(
+            {
+                "WFItemType": 0,
+                "WFKey": _text("day"),
+                "WFValue": _text_with_output("Provided Input", ask_uuid),
+            }
+        )
     return {
         "WFWorkflowMinimumClientVersion": 900,
         "WFWorkflowMinimumClientVersionString": "900",
@@ -73,7 +105,7 @@ def build_workflow(url, token):
         "WFWorkflowInputContentItemClasses": [],
         "WFWorkflowHasOutputFallback": False,
         "WFWorkflowHasShortcutInputVariables": False,
-        "WFWorkflowActions": [
+        "WFWorkflowActions": ask_actions + [
             {
                 "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
                 "WFWorkflowActionParameters": {
@@ -94,7 +126,7 @@ def build_workflow(url, token):
                     },
                     "WFHTTPBodyType": "JSON",
                     "WFJSONValues": {
-                        "Value": {"WFDictionaryFieldValueItems": []},
+                        "Value": {"WFDictionaryFieldValueItems": body_items},
                         "WFSerializationType": "WFDictionaryFieldValue",
                     },
                 },
@@ -127,23 +159,23 @@ def build_workflow(url, token):
     }
 
 
-def unsigned_shortcut(url, token):
+def unsigned_shortcut(url, token, ask_day=False):
     """Return the *unsigned* .shortcut plist bytes (no macOS signer required).
 
     iOS/macOS can import this when "Allow Untrusted Shortcuts" is enabled. Lets a
     non-macOS host (e.g. a Raspberry Pi) still hand out a ready-to-use, correctly
     personalized shortcut without the macOS ``shortcuts`` CLI.
     """
-    return plistlib.dumps(build_workflow(url, token))
+    return plistlib.dumps(build_workflow(url, token, ask_day=ask_day))
 
 
-def signed_shortcut(url, token):
+def signed_shortcut(url, token, ask_day=False):
     """Build, sign, and return the .shortcut file bytes for the Siri shortcut."""
-    workflow = build_workflow(url, token)
+    workflow = build_workflow(url, token, ask_day=ask_day)
     with tempfile.TemporaryDirectory() as tmp:
         # The sign command rejects inputs without a .shortcut extension.
         unsigned_path = os.path.join(tmp, "unsigned.shortcut")
-        signed_path = os.path.join(tmp, "Play Flow Crate.shortcut")
+        signed_path = os.path.join(tmp, f"{shortcut_name(ask_day)}.shortcut")
         with open(unsigned_path, "wb") as fh:
             plistlib.dump(workflow, fh)
         try:

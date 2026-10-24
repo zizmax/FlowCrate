@@ -207,6 +207,27 @@
         </div>
       {% endif %}
 
+      <div class="shortcut-option">
+        <p class="muted">For an older day, add a second shortcut, <strong>Rewind Flow Crate</strong>.
+          Siri asks "Which day?" — answer "yesterday", "last Wednesday", or "October 15".
+          With no post that day, it plays the closest earlier one.</p>
+        <p>
+          {% if is_macos %}
+            <a class="button" href="/api/siri-shortcut?rewind=1" download>Download Rewind Shortcut</a>
+          {% else %}
+            {% if universal_rewind_available %}
+              <a class="button" href="/api/siri-shortcut/universal?rewind=1" download>Download universal Rewind</a>
+            {% endif %}
+            <a class="button" href="/api/siri-shortcut?rewind=1" download>Download Rewind (unsigned)</a>
+          {% endif %}
+        </p>
+        <p class="muted">Or build it from your existing one: in Shortcuts, duplicate
+          <strong>Play Flow Crate</strong> and rename the copy <strong>Rewind Flow Crate</strong>.
+          Add <strong>Ask for Input</strong> (Text, prompt "Which day?") as the first action. In
+          <strong>Get Contents of URL</strong>, set Request Body to JSON and add a Text field
+          <code>day</code> set to <strong>Provided Input</strong>.</p>
+      </div>
+
       <details class="advanced">
         <summary>Set up the Shortcut manually</summary>
         <p class="muted">The phone must be on the same Wi-Fi network as this computer.</p>

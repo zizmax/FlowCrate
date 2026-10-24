@@ -431,8 +431,39 @@ def get_recent_posts(limit=5):
     return posts[:limit]
 
 
-def _recent_posts_from_archive_api(limit):
-    url = f"https://www.flowstate.fm/api/v1/archive?sort=new&search=&offset=0&limit={limit}"
+def get_archive_posts(offset=0, limit=50):
+    """Return one page of the archive API, newest first, starting ``offset`` posts back.
+
+    The API may return fewer posts than ``limit`` (the first page tops out around
+    two dozen), so callers paging through it must advance by ``len(page)``.
+    """
+    return _recent_posts_from_archive_api(limit, offset=offset)
+
+
+def find_archive_posts(on_or_before, max_posts=600):
+    """Page back through the archive until reaching posts dated on/before a day.
+
+    Returns ``(same_day, earlier)``: every post dated exactly ``on_or_before``
+    (an ISO date string) and the newest post dated before it (or None).
+    """
+    same_day = []
+    offset = 0
+    while offset < max_posts:
+        page = get_archive_posts(offset=offset)
+        if not page:
+            break
+        for post in page:
+            date = post.get("date") or ""
+            if date == on_or_before:
+                same_day.append(post)
+            elif date and date < on_or_before:
+                return same_day, post
+        offset += len(page)
+    return same_day, None
+
+
+def _recent_posts_from_archive_api(limit, offset=0):
+    url = f"https://www.flowstate.fm/api/v1/archive?sort=new&search=&offset={offset}&limit={limit}"
     try:
         response = get_session().get(url, timeout=30)
         response.raise_for_status()

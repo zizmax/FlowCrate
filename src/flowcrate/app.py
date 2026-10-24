@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 import webbrowser
-from datetime import datetime
+from datetime import date, datetime
 
 from flask import (
     Flask,
@@ -27,6 +27,8 @@ from flask import (
 from . import __version__, sonos
 from .cache import (
     cache_is_stale,
+    cache_post,
+    cached_post_on,
     dashboard_data,
     has_cached_post,
     last_refreshed_at,
@@ -36,12 +38,14 @@ from .cache import (
     selected_track_uris,
 )
 from .config import load_config, masked, reset_local_config, save_config, save_config_values
+from .dates import LATEST, parse_day, spoken_date
 from .logs import list_logs, read_log
 from .paths import CONFIG_FILE, LOGS_DIR, TOKEN_CACHE, ensure_dirs
 from .playback import DevicePickerRequired, resolve_playback_target
 from .scraper import (
     browser_from_user_agent,
     check_flowstate_access,
+    find_archive_posts,
     get_recent_posts,
     reset_session_cache,
     set_preferred_browser,
@@ -51,6 +55,7 @@ from .shortcut import (
     UNIVERSAL_HOST_PLACEHOLDER,
     UNIVERSAL_TOKEN,
     ShortcutError,
+    shortcut_name,
     signed_shortcut,
     unsigned_shortcut,
 )
@@ -317,6 +322,9 @@ def create_app():
             is_macos=platform.system() == "Darwin",
             universal_host_placeholder=UNIVERSAL_HOST_PLACEHOLDER,
             universal_token=UNIVERSAL_TOKEN,
+            universal_rewind_available=os.path.exists(
+                os.path.join(app.static_folder, "rewind-flow-crate-universal.shortcut")
+            ),
             spotify_redirect_uri=spotify_redirect_uri,
             https_port=https_port,
         )
@@ -458,10 +466,30 @@ def create_app():
         body = request.get_json(silent=True) or {}
         play = body.get("play", True)
         room = (body.get("room") or "").strip() or cfg.sonos_room or None
+        # Optional "day" (sent by the Rewind Flow Crate shortcut): whatever the
+        # user told Siri, e.g. "yesterday", "last Wednesday", "October 15".
+        day = parse_day(str(body.get("day") or ""))
+        if day is None:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "error": f"Could not understand the day {body.get('day')!r}.",
+                        "speak": "Sorry, I didn't catch which day. Try yesterday, last Wednesday, or October 15.",
+                    }
+                ),
+                400,
+            )
+        if day != LATEST and day >= date.today():
+            day = LATEST
+        which = "the latest Flow State post" if day == LATEST else f"the Flow State post from {spoken_date(day)}"
 
         try:
             _ensure_latest_cached()
-            post, entries = latest_cached_post()
+            if day == LATEST:
+                post, entries = latest_cached_post()
+            else:
+                post, entries = _post_for_day(day)
             if not post:
                 raise RuntimeError("No Flow State posts were found.")
         except Exception as exc:
@@ -470,8 +498,8 @@ def create_app():
                 jsonify(
                     {
                         "ok": False,
-                        "error": f"Could not read the latest Flow State post: {exc}",
-                        "speak": "Sorry, Flow Crate could not read the latest Flow State post.",
+                        "error": f"Could not read {which}: {exc}",
+                        "speak": f"Sorry, Flow Crate could not read {which}.",
                     }
                 ),
                 502,
@@ -480,12 +508,13 @@ def create_app():
         resolved = [(entry, entry["spotify_uri"]) for entry in entries if entry.get("spotify_uri")]
         unresolved = [entry for entry in entries if not entry.get("spotify_uri")]
         if not resolved:
+            post_name = "the latest post" if day == LATEST else f"{post.get('title') or 'the post'}"
             return (
                 jsonify(
                     {
                         "ok": False,
-                        "error": "No playable Spotify tracks were found in the latest post.",
-                        "speak": "Sorry, Flow Crate found no playable tracks in the latest post.",
+                        "error": f"No playable Spotify tracks were found in {post_name}.",
+                        "speak": f"Sorry, Flow Crate found no playable tracks in {post_name}.",
                     }
                 ),
                 400,
@@ -519,7 +548,7 @@ def create_app():
             )
 
         artists = _unique_artists(resolved)
-        speak = _build_speak(post, result, len(unresolved), False)
+        speak = _build_speak(post, result, len(unresolved), False, requested_day=None if day == LATEST else day)
         return jsonify(
             {
                 "ok": True,
@@ -543,18 +572,20 @@ def create_app():
         cfg = load_config()
         if not cfg.api_token:
             return jsonify({"ok": False, "error": "Set an API token in Settings first."}), 400
+        # ?rewind=1 builds "Rewind Flow Crate", which asks Siri's "Which day?" first.
+        ask_day = request.args.get("rewind") == "1"
         url = f"http://{_local_hostname()}:{_local_port()}/api/play-latest"
         if platform.system() == "Darwin":
             try:
-                data = signed_shortcut(url, cfg.api_token)
+                data = signed_shortcut(url, cfg.api_token, ask_day=ask_day)
             except ShortcutError as exc:
                 return jsonify({"ok": False, "error": str(exc)}), 502
         else:
-            data = unsigned_shortcut(url, cfg.api_token)
+            data = unsigned_shortcut(url, cfg.api_token, ask_day=ask_day)
         return Response(
             data,
             mimetype="application/octet-stream",
-            headers={"Content-Disposition": 'attachment; filename="Play Flow Crate.shortcut"'},
+            headers={"Content-Disposition": f'attachment; filename="{shortcut_name(ask_day)}.shortcut"'},
         )
 
     @app.route("/api/siri-shortcut/universal")
@@ -564,14 +595,16 @@ def create_app():
         Lets a non-macOS host still offer a one-tap, iOS-Safari-importable signed
         shortcut; the user swaps in their host + token once after importing.
         """
-        path = os.path.join(app.static_folder, "play-flow-crate-universal.shortcut")
+        ask_day = request.args.get("rewind") == "1"
+        filename = "rewind-flow-crate-universal.shortcut" if ask_day else "play-flow-crate-universal.shortcut"
+        path = os.path.join(app.static_folder, filename)
         if not os.path.exists(path):
             return jsonify({"ok": False, "error": "Universal shortcut is not bundled in this build."}), 404
         return send_file(
             path,
             mimetype="application/octet-stream",
             as_attachment=True,
-            download_name="Play Flow Crate.shortcut",
+            download_name=f"{shortcut_name(ask_day)}.shortcut",
         )
 
     @app.route("/spotify/login")
@@ -637,7 +670,7 @@ def _ensure_latest_cached():
     latest-post probe is a single lightweight request.
     """
     if cache_is_stale():
-        refresh_from_flowstate(limit=2)
+        _quick_refresh_then_catch_up()
         return
     try:
         recent = get_recent_posts(limit=1)
@@ -645,7 +678,36 @@ def _ensure_latest_cached():
         logging.warning("api/play-latest latest-post check failed: %s", exc)
         return
     if recent and not has_cached_post(recent[0].get("url")):
-        refresh_from_flowstate(limit=2)
+        _quick_refresh_then_catch_up()
+
+
+def _quick_refresh_then_catch_up():
+    """Fetch just the newest posts so Siri answers fast, then fill any older
+    gap in the background (a quick refresh alone once left whole weeks uncached)."""
+    refresh_from_flowstate(limit=2, catch_up=False)
+    _start_background_refresh(limit=11)
+
+
+def _post_for_day(day):
+    """Return (post, entries) for a requested day: the cache first, then the live archive.
+
+    With no post that day (weekends, holidays) it falls back to the closest
+    earlier post; _build_speak tells the listener about the substitution.
+    """
+    iso = day.isoformat()
+    post, entries = cached_post_on(iso)
+    if post:
+        return post, entries
+    same_day, earlier = find_archive_posts(iso)
+    if same_day:
+        found = [cache_post(candidate) for candidate in same_day]
+        return max(found, key=lambda pair: sum(1 for entry in pair[1] if entry.get("spotify_uri")))
+    if earlier:
+        post, entries = cached_post_on(earlier.get("date") or "")
+        if post:
+            return post, entries
+        return cache_post(earlier)
+    return None, []
 
 
 def _unique_artists(resolved, limit=8):
@@ -659,13 +721,26 @@ def _unique_artists(resolved, limit=8):
     return artists
 
 
-def _build_speak(post, result, unresolved_count, search_unavailable):
+def _build_speak(post, result, unresolved_count, search_unavailable, requested_day=None):
     title = post.get("title") or "the latest Flow State post"
     date = post.get("date") or ""
     queued = result["queued"]
     room = result["room"]
     track_word = "track" if queued == 1 else "tracks"
-    if date:
+    if requested_day:
+        try:
+            post_day = datetime.strptime(date, "%Y-%m-%d").date()
+        except ValueError:
+            post_day = None
+        when = spoken_date(post_day) if post_day else date
+        if post_day == requested_day:
+            speak = f"Playing {title} from {when}. {queued} {track_word} on {room}."
+        else:
+            speak = (
+                f"There's no Flow State post on {spoken_date(requested_day)}. "
+                f"Playing {title} from {when} instead. {queued} {track_word} on {room}."
+            )
+    elif date:
         speak = f"Playing {title} from {date}. {queued} {track_word} on {room}."
     else:
         speak = f"Playing {title}. {queued} {track_word} on {room}."

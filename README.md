@@ -3,7 +3,8 @@
 Flow Crate is a small personal companion app for the
 [Flow State](https://flowstate.fm) ambient-music newsletter. It shows you the
 latest posts and plays the day's picks on your Spotify — and, if you like, on
-your Sonos speakers with a simple "Hey Siri, play Flow Crate" shortcut.
+your Sonos speakers with a simple "Hey Siri, play Flow Crate" shortcut (and
+"Rewind Flow Crate" for an earlier day: "yesterday", "last Wednesday", "October 15").
 
 It's an unofficial personal tool. Flow Crate fetches the newsletter for you the
 same way your browser does when you open it, and it never redistributes any of

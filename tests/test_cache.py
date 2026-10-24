@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 from flowcrate.cache import (
     _set_cache_meta,
     cache_is_stale,
+    cache_post,
+    cached_post_on,
     connect,
     dashboard_data,
     latest_cached_post,
@@ -100,15 +102,15 @@ class CacheTests(unittest.TestCase):
         self.assertEqual(parsed["uri"], "spotify:album:abc123")
         self.assertEqual(parsed["item_type"], "album")
 
-    def test_incremental_refresh_stops_at_cached_unchanged_post(self):
+    def test_incremental_refresh_skips_cached_unchanged_posts(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "flowcrate.db"
             with connect(db_path) as conn:
-                replace_cache(conn, _seed_payload(), cache_source="flowstate")
+                replace_cache(conn, _two_post_payload(), cache_source="flowstate")
 
             posts = [
                 {"title": "Latest", "url": "https://www.flowstate.fm/p/latest", "date": "2026-05-22"},
-                {"title": "Older", "url": "https://www.flowstate.fm/p/older", "date": "2026-05-21"},
+                {"title": "Previous", "url": "https://www.flowstate.fm/p/previous", "date": "2026-05-18"},
             ]
             with patch("flowcrate.cache.get_recent_posts", return_value=posts), patch(
                 "flowcrate.cache.extract_source_post"
@@ -117,6 +119,96 @@ class CacheTests(unittest.TestCase):
 
             self.assertEqual(count, 0)
             extract.assert_not_called()
+
+    def test_refresh_fills_gap_behind_a_cached_post(self):
+        # Regression: a quick 2-post refresh used to cache the newest post, and the
+        # next refresh stopped at it, so the posts just behind it were never fetched.
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "flowcrate.db"
+            with connect(db_path) as conn:
+                replace_cache(conn, _two_post_payload(), cache_source="flowstate")
+
+            gap = {"title": "Gap", "url": "https://www.flowstate.fm/p/gap", "date": "2026-05-20"}
+            posts = [
+                {"title": "Latest", "url": "https://www.flowstate.fm/p/latest", "date": "2026-05-22"},
+                gap,
+                {"title": "Previous", "url": "https://www.flowstate.fm/p/previous", "date": "2026-05-18"},
+            ]
+            with patch("flowcrate.cache.get_recent_posts", return_value=posts), patch(
+                "flowcrate.cache.extract_source_post", return_value=_source("Gap", "2026-05-20")
+            ) as extract:
+                count = refresh_from_flowstate(limit=3, db_path=db_path)
+
+            self.assertEqual(count, 1)
+            extract.assert_called_once_with(gap["url"])
+            post, entries = cached_post_on("2026-05-20", db_path)
+            self.assertEqual(post["title"], "Gap")
+            self.assertEqual(entries[0]["spotify_uri"], "spotify:track:gap")
+
+    def test_refresh_catches_up_past_window_after_long_absence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "flowcrate.db"
+            with connect(db_path) as conn:
+                replace_cache(conn, _seed_payload(), cache_source="flowstate")
+
+            newest = [
+                {"title": "New 3", "url": "https://www.flowstate.fm/p/n3", "date": "2026-05-29"},
+                {"title": "New 2", "url": "https://www.flowstate.fm/p/n2", "date": "2026-05-28"},
+            ]
+            older_page = [
+                {"title": "New 1", "url": "https://www.flowstate.fm/p/n1", "date": "2026-05-27"},
+                {"title": "Latest", "url": "https://www.flowstate.fm/p/latest", "date": "2026-05-22"},
+            ]
+            with patch("flowcrate.cache.get_recent_posts", return_value=newest), patch(
+                "flowcrate.cache.get_archive_posts", return_value=older_page
+            ) as archive, patch(
+                "flowcrate.cache.extract_source_post", side_effect=lambda url: _source(url, "")
+            ) as extract:
+                count = refresh_from_flowstate(limit=2, db_path=db_path)
+
+            archive.assert_called_once_with(offset=2)
+            self.assertEqual(count, 3)
+            self.assertEqual(
+                [call.args[0] for call in extract.call_args_list],
+                ["https://www.flowstate.fm/p/n3", "https://www.flowstate.fm/p/n2", "https://www.flowstate.fm/p/n1"],
+            )
+
+    def test_quick_refresh_without_catch_up_does_not_page(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "flowcrate.db"
+            with connect(db_path) as conn:
+                replace_cache(conn, _seed_payload(), cache_source="flowstate")
+            newest = [{"title": "New", "url": "https://www.flowstate.fm/p/n", "date": "2026-05-29"}]
+            with patch("flowcrate.cache.get_recent_posts", return_value=newest), patch(
+                "flowcrate.cache.get_archive_posts"
+            ) as archive, patch("flowcrate.cache.extract_source_post", return_value=_source("New", "")):
+                refresh_from_flowstate(limit=1, db_path=db_path, catch_up=False)
+            archive.assert_not_called()
+
+    def test_cache_post_fetches_once_and_returns_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "flowcrate.db"
+            with connect(db_path) as conn:
+                replace_cache(conn, _seed_payload(), cache_source="flowstate")
+            old = {"title": "Old", "url": "https://www.flowstate.fm/p/old", "date": "2026-03-02"}
+            with patch("flowcrate.cache.extract_source_post", return_value=_source("Old", "2026-03-02")) as extract:
+                post, entries = cache_post(old, db_path)
+                again, _ = cache_post(old, db_path)
+
+            extract.assert_called_once()
+            self.assertEqual(post["date"], "2026-03-02")
+            self.assertEqual(again["url"], old["url"])
+            self.assertEqual(entries[0]["spotify_uri"], "spotify:track:gap")
+            # Older posts sort after newer ones on the dashboard.
+            self.assertEqual(latest_cached_post(db_path)[0]["title"], "Latest")
+
+    def test_cached_post_on_returns_none_for_missing_day(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = Path(tmp) / "flowcrate.db"
+            with connect(db_path) as conn:
+                replace_cache(conn, _two_post_payload(), cache_source="flowstate")
+            self.assertEqual(cached_post_on("2026-05-19", db_path), (None, []))
+            self.assertEqual(cached_post_on("2026-05-18", db_path)[0]["title"], "Previous")
 
     def test_incremental_refresh_persists_raw_snapshot_and_direct_link(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -399,6 +491,26 @@ def _unlinked_source(two_items=False):
         "source_date": "2026-05-24",
         "raw_html": "<html>snapshot</html>",
         "items": items,
+    }
+
+
+def _source(title, date):
+    return {
+        "title": title,
+        "source_date": date,
+        "raw_html": f"<html>{title}</html>",
+        "items": [
+            {
+                "artist": "Artist",
+                "name": "Song",
+                "type": "track",
+                "spotify_link": "https://open.spotify.com/track/gap",
+                "metadata": "5m",
+                "raw_text": "Song - Artist",
+                "source_url": "",
+                "source_date": date,
+            }
+        ],
     }
 
 

@@ -5,7 +5,7 @@ from hashlib import sha256
 from datetime import datetime, timedelta
 
 from .paths import FLOWCRATE_DB, ensure_dirs
-from .scraper import extract_source_post, get_recent_posts
+from .scraper import extract_source_post, get_archive_posts, get_recent_posts
 from .spotify import SpotifyManager, SpotifyRateLimitError, parse_spotify_url, spotify_service_state
 
 
@@ -46,7 +46,12 @@ def dashboard_data(db_path=None):
         }
 
 
-def refresh_from_flowstate(limit=11, progress=None, db_path=None):
+# A refresh that finds no cached post among the newest ones keeps paging back
+# (up to this many posts) so a long absence never leaves a hole in the cache.
+_CATCH_UP_MAX_POSTS = 120
+
+
+def refresh_from_flowstate(limit=11, progress=None, db_path=None, catch_up=True):
     if progress:
         progress(f"Discovering latest {limit} Flow State posts")
     posts = get_recent_posts(limit=limit)
@@ -56,6 +61,8 @@ def refresh_from_flowstate(limit=11, progress=None, db_path=None):
     searcher_state = {"searcher": None, "rate_limited": False}
     with connect(db_path) as conn:
         known = _known_posts(conn)
+        if catch_up and known:
+            posts = _extend_to_known_post(posts, known, progress=progress)
         _set_cache_meta(conn, "refresh_started_at", now)
         conn.commit()
 
@@ -64,10 +71,12 @@ def refresh_from_flowstate(limit=11, progress=None, db_path=None):
             if not url:
                 continue
             existing = known.get(url)
+            # Skip (don't stop at) cached posts: an older post can still be missing
+            # if an earlier refresh only looked at the newest one or two.
             if existing and _post_metadata_unchanged(existing, post):
                 if progress:
-                    progress(f"Stopping at cached post {idx}/{len(posts)}: {post.get('title') or url}")
-                break
+                    progress(f"Skipping cached post {idx}/{len(posts)}: {post.get('title') or url}")
+                continue
 
             if progress:
                 progress(f"Fetching Flow State post {idx}/{len(posts)}: {post.get('title') or url}")
@@ -89,6 +98,68 @@ def refresh_from_flowstate(limit=11, progress=None, db_path=None):
         _set_cache_meta(conn, "refreshed_at", now)
         conn.commit()
     return fetched_count
+
+
+def _extend_to_known_post(posts, known, progress=None):
+    """Page further back through the archive until reaching an already-cached post."""
+    posts = list(posts)
+    seen = {post.get("url") for post in posts}
+    if seen & set(known):
+        return posts
+    while len(posts) < _CATCH_UP_MAX_POSTS:
+        if progress:
+            progress(f"Catching up on posts older than {len(posts)} discovered")
+        page = get_archive_posts(offset=len(posts))
+        if not page:
+            break
+        for post in page:
+            if post.get("url") in seen:
+                continue
+            seen.add(post.get("url"))
+            posts.append(post)
+        if seen & set(known):
+            break
+    return posts[:_CATCH_UP_MAX_POSTS]
+
+
+def cached_post_on(day, db_path=None):
+    """Return (post, entries) for the cached post dated ``day`` (ISO), or (None, []).
+
+    When several posts share a day, the one with the most playable rows wins.
+    """
+    best = (None, [])
+    with connect(db_path) as conn:
+        for post in _read_posts(conn):
+            if post.get("date") != day:
+                continue
+            entries = _read_entries(conn, post["url"])
+            if best[0] is None or _playable_count(entries) > _playable_count(best[1]):
+                best = (post, entries)
+    return best
+
+
+def cache_post(post, db_path=None):
+    """Make sure one discovered post is cached (fetching it if needed); return (post, entries).
+
+    Lets Siri play an older day that the regular newest-first refresh never reached.
+    """
+    url = post.get("url") or ""
+    with connect(db_path) as conn:
+        if url not in _known_posts(conn):
+            now = datetime.now().isoformat(timespec="seconds")
+            source = extract_source_post(url)
+            upsert_source_post(conn, post, source, 0, now, _content_hash(source.get("raw_html", "")))
+            _resolve_unlinked_entries(conn, url, {"searcher": None, "rate_limited": False})
+            _reposition_cached_posts(conn, [])
+            conn.commit()
+        for cached in _read_posts(conn):
+            if cached["url"] == url:
+                return cached, _read_entries(conn, url)
+    return None, []
+
+
+def _playable_count(entries):
+    return sum(1 for entry in entries if entry.get("spotify_uri"))
 
 
 # Terminal match states are never searched again: each item is searched at most once, ever.
