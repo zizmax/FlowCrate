@@ -17,6 +17,12 @@ _Updated 2026-10-23._
   existing "Play Flow Crate" shortcut is unchanged (empty body = latest).
   Settings offers the Rewind shortcut and how to build it from the existing one.
 - Verbatim request: `docs/feedback/2026-10-23-siri-dates.md`.
+- Deployed 2026-10-23: the Pi runs eb5d275 (pipx from GitHub). Live test of
+  `{"day": "last Wednesday"}` from the LAN played Julia Gjertsen (Oct 21) on Sonos.
+  A one-time repair fetched the 26 older posts missing from the Pi's cache;
+  0 posts since Jun 26 are missing now. Backup: `~/.flowcrate/flowcrate.db.bak-2026-10-23`.
+- Landing page deployed with `npx wrangler pages deploy site --project-name flowcrate --branch main`
+  (direct upload; pushing to GitHub does not redeploy it).
 
 ## Open
 
@@ -25,6 +31,7 @@ _Updated 2026-10-23._
   then, Settings on non-macOS hosts hides that button.
 - Unsigned `.shortcut` import on current iOS is UNVERIFIED.
 - An uncommitted change that moves the Spotify redirect to `http://127.0.0.1` exists
-  in the main checkout. Its origin is unknown and it is not committed. Do not
+  in the main checkout. Its origin is unknown and it is not committed (copy:
+  `~/code/FlowCrate-spotify-loopback-wip.patch`). Do not
   ship it to a headless Pi without deciding: it breaks Connect Spotify from
   other LAN computers.
