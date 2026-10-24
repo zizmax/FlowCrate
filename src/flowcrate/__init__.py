@@ -1,3 +1,3 @@
 """Flow Crate local playlist and queue automation app."""
 
-__version__ = "1.9.6"
+__version__ = "1.9.7"

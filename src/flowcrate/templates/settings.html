@@ -135,6 +135,13 @@
       Sonos Room Name
       <input id="sonos-room-input" name="SONOS_ROOM" type="text" value="{{ cfg.sonos_room }}">
     </label>
+    <label>
+      When Flow Crate plays on Sonos
+      <select id="sonos-queue-mode" name="SONOS_QUEUE_MODE">
+        <option value="replace"{% if cfg.sonos_queue_mode != "append" %} selected{% endif %}>Clear the queue, then play</option>
+        <option value="append"{% if cfg.sonos_queue_mode == "append" %} selected{% endif %}>Add to the end of the queue, then play</option>
+      </select>
+    </label>
     <div class="button-row">
       <button id="sonos-scan-btn" type="button">Scan for Speakers</button>
       <select id="sonos-speaker-select" hidden>

@@ -24,6 +24,11 @@ _Updated 2026-10-23._
 - Landing page deployed with `npx wrangler pages deploy site --project-name flowcrate --branch main`
   (direct upload; pushing to GitHub does not redeploy it).
 
+- v1.9.7: Settings → "When Flow Crate plays on Sonos" (`SONOS_QUEUE_MODE`):
+  `replace` (default) clears the Sonos queue before playing; `append` keeps the
+  old behavior. Queue-only requests (`"play": false`) always append. History
+  showed no deliberate reason for appending (it came from the Sonos spike).
+
 ## Open
 
 - `src/flowcrate/static/rewind-flow-crate-universal.shortcut` is not built yet.

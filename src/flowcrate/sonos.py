@@ -102,8 +102,14 @@ def get_speaker(ip=None, room=None, timeout=5):
     return matches[0].group.coordinator
 
 
-def queue_and_play(speaker, uris, play=True):
-    """Append each Spotify URI to the speaker's queue and optionally start playback."""
+def queue_and_play(speaker, uris, play=True, replace=False):
+    """Add each Spotify URI to the speaker's queue and optionally start playback.
+
+    With ``replace`` the existing queue is cleared first; otherwise the URIs are
+    appended after whatever is already queued.
+    """
+    if replace:
+        speaker.clear_queue()
     sharelink = ShareLinkPlugin(speaker)
     first_position = None
     queued = 0

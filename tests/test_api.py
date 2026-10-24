@@ -333,6 +333,11 @@ class SettingsPageTests(unittest.TestCase):
         self.assertIn(".local", html)
         self.assertNotIn(".lan.local", html)
 
+    def test_settings_renders_queue_mode_defaulting_to_clear(self):
+        html = self._get_settings().get_data(as_text=True)
+        self.assertIn('name="SONOS_QUEUE_MODE"', html)
+        self.assertIn('<option value="replace" selected>Clear the queue, then play</option>', html)
+
     def test_settings_renders_download_shortcut_and_no_md_reference(self):
         html = self._get_settings().get_data(as_text=True)
         self.assertIn("Download Siri Shortcut", html)
@@ -406,6 +411,33 @@ class ApiTestSubstackTests(unittest.TestCase):
     def test_reset_route_removed(self):
         response = self._app().test_client().post("/settings/reset")
         self.assertEqual(response.status_code, 404)
+
+
+class ApiQueueModeTests(unittest.TestCase):
+    def _play(self, cfg, body):
+        app = create_app()
+        app.config.update(TESTING=True)
+        post = {"title": "Djrum", "date": "2026-10-23", "url": "https://x/dj"}
+        queue_result = {"queued": 1, "first_position": 1, "room": "Office"}
+        with patch("flowcrate.app.load_config", return_value=cfg), \
+             patch("flowcrate.app._ensure_latest_cached"), \
+             patch("flowcrate.app.latest_cached_post", return_value=(post, [_entry()])), \
+             patch("flowcrate.app.sonos.get_speaker", return_value=MagicMock()), \
+             patch("flowcrate.app.sonos.queue_and_play", return_value=queue_result) as queue_and_play:
+            response = app.test_client().post(
+                "/api/play-latest", headers={"X-FlowCrate-Token": "secret"}, json=body
+            )
+        self.assertEqual(response.status_code, 200)
+        return queue_and_play.call_args.kwargs
+
+    def test_default_clears_queue(self):
+        self.assertEqual(self._play(_cfg(), {}), {"play": True, "replace": True})
+
+    def test_append_setting_keeps_queue(self):
+        self.assertEqual(self._play(_cfg(sonos_queue_mode="append"), {}), {"play": True, "replace": False})
+
+    def test_queue_only_request_never_clears(self):
+        self.assertEqual(self._play(_cfg(), {"play": False}), {"play": False, "replace": False})
 
 
 class ApiPlayDayTests(unittest.TestCase):

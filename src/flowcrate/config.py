@@ -14,8 +14,12 @@ KNOWN_KEYS = [
     "FLOWSTATE_CONNECT_SID",
     "SONOS_IP",
     "SONOS_ROOM",
+    "SONOS_QUEUE_MODE",
     "API_TOKEN",
 ]
+# What a Sonos play does to the speaker's existing queue.
+QUEUE_REPLACE = "replace"
+QUEUE_APPEND = "append"
 LEGACY_ENV_KEYS = [
     "SPOTIPY_CLIENT_ID",
     "SPOTIPY_CLIENT_SECRET",
@@ -32,6 +36,7 @@ class AppConfig:
     flowstate_connect_sid: str = ""
     sonos_ip: str = ""
     sonos_room: str = ""
+    sonos_queue_mode: str = QUEUE_REPLACE
     api_token: str = ""
 
     @property
@@ -48,6 +53,7 @@ class AppConfig:
             "FLOWSTATE_CONNECT_SID": self.flowstate_connect_sid,
             "SONOS_IP": self.sonos_ip,
             "SONOS_ROOM": self.sonos_room,
+            "SONOS_QUEUE_MODE": self.sonos_queue_mode,
             "API_TOKEN": self.api_token,
         }
 
@@ -67,6 +73,7 @@ def load_config():
         flowstate_connect_sid=os.getenv("FLOWSTATE_CONNECT_SID", ""),
         sonos_ip=os.getenv("SONOS_IP", ""),
         sonos_room=os.getenv("SONOS_ROOM", ""),
+        sonos_queue_mode=QUEUE_APPEND if os.getenv("SONOS_QUEUE_MODE", "") == QUEUE_APPEND else QUEUE_REPLACE,
         api_token=os.getenv("API_TOKEN", ""),
     )
 

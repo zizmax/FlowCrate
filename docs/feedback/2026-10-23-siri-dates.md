@@ -15,3 +15,7 @@
    (#1 = commit to main, push to zizmax/FlowCrate, reinstall on the Pi, restart, test by playing a past day.)
 4. Uncommitted Spotify 127.0.0.1 redirect changes in the main checkout:
    > I'm afraid to tell you what to do without knowing the history/context of the changes. Do more investigating on the what/why so I can more confidently decide. I'm worried because I want the github to be generic but the Pi to be config'd for my network and I can't remember why/when/what I would have changed it and not commit/push, but i know i had a lot of problems getting it working just right in my env, so i want to be really careful here
+
+## Follow-up (same day, after Rewind was confirmed working on the phone)
+
+> 1. New shortcut added and confirmed working. is there anything else crucial for me to test now? 2. so there's no risk to removing the uncommited work? 3. do you see any evidence that I purposely designed it to append to the Sonos queue versus clearing and adding? if not, make it toggleable setting in the web UI, defaulting to clear and play, and set my current config to clear and play

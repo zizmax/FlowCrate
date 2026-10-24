@@ -37,7 +37,7 @@ from .cache import (
     refresh_from_flowstate,
     selected_track_uris,
 )
-from .config import load_config, masked, reset_local_config, save_config, save_config_values
+from .config import QUEUE_REPLACE, load_config, masked, reset_local_config, save_config, save_config_values
 from .dates import LATEST, parse_day, spoken_date
 from .logs import list_logs, read_log
 from .paths import CONFIG_FILE, LOGS_DIR, TOKEN_CACHE, ensure_dirs
@@ -522,7 +522,10 @@ def create_app():
 
         try:
             speaker = sonos.get_speaker(ip=cfg.sonos_ip or None, room=room)
-            result = sonos.queue_and_play(speaker, [uri for _, uri in resolved], play=play)
+            # Clearing only makes sense when we start playback; a queue-only
+            # request ("play": false) always appends.
+            replace = play and cfg.sonos_queue_mode == QUEUE_REPLACE
+            result = sonos.queue_and_play(speaker, [uri for _, uri in resolved], play=play, replace=replace)
         except sonos.SonosError as exc:
             return (
                 jsonify(
