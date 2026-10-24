@@ -28,6 +28,9 @@ _Updated 2026-10-23._
   `replace` (default) clears the Sonos queue before playing; `append` keeps the
   old behavior. Queue-only requests (`"play": false`) always append. History
   showed no deliberate reason for appending (it came from the Sonos spike).
+  Deployed to the Pi 2026-10-23 20:32 with `SONOS_QUEUE_MODE="replace"` (config
+  backup `~/.flowcrate/config.env.bak-2026-10-23`). Live test: replaying Jun 18
+  queued at position 1 and the queue stayed at 12 items (append would have used 13).
 
 ## Open
 
