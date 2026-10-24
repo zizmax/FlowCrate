@@ -38,8 +38,6 @@ _Updated 2026-10-23._
   `scripts/build_universal_shortcut.py` needs a Mac signed into iCloud. Until
   then, Settings on non-macOS hosts hides that button.
 - Unsigned `.shortcut` import on current iOS is UNVERIFIED.
-- An uncommitted change that moves the Spotify redirect to `http://127.0.0.1` exists
-  in the main checkout. Its origin is unknown and it is not committed (copy:
-  `~/code/FlowCrate-spotify-loopback-wip.patch`). Do not
-  ship it to a headless Pi without deciding: it breaks Connect Spotify from
-  other LAN computers.
+- 2026-10-23: discarded the uncommitted change that moved the Spotify redirect to
+  `http://127.0.0.1`. Its origin was unknown, and on a headless Pi it would break
+  Connect Spotify from other LAN computers. Copy: `~/code/FlowCrate-spotify-loopback-wip.patch`.
